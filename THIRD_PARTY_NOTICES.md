@@ -2,8 +2,7 @@
 
 This file enumerates every OSS dependency `{{repo_full_name}}` ships
 against (= direct + transitive) along with each license. It is
-**auto-generated** by `task gen-notices` (= calls
-`_core/scripts/gen-third-party-notices.py` which wraps `pip-licenses`
+**auto-generated** by `task gen-notices` (= wraps `pip-licenses`
 for Python and `license-checker-rseidelsohn` for Node). Do not edit
 this file by hand; re-run `task gen-notices` and commit the diff.
 

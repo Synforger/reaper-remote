@@ -9,4 +9,4 @@
 - **launchd-systemd.md** — 常駐 service として動かす場合の設定 (= launchd plist / systemd unit / pm2 ecosystem 等)
 - **backup.md** — 物理 backup の対象 file / 頻度 / 復元手順
 
-`task install-service` / `task restart` / `task logs` 等の運用 task を `Taskfile.local.yml` に定義した場合、 ここから link する。
+運用 task (= 常駐の登録 / 再起動 / ログ確認) を `Taskfile.local.yml` に定義した場合、 ここから link する。
