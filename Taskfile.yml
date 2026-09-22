@@ -22,45 +22,50 @@ tasks:
       - task --list
 
   # ---------------------------------------------------------------------------
-  # Stack stubs — replace each echo with your project's real command (or
-  # define them in Taskfile.local.yml, which is included when present).
+  # Stack verbs — every derived repo answers to the same names; these are
+  # reaper-remote's commands (Python server via uv, plain-JS UI via node).
   # Keeping the task names stable means every derived repo answers to the
   # same verbs regardless of language.
   # ---------------------------------------------------------------------------
   setup:
-    desc: Initial setup (stub — fill in your stack's dependency install)
+    desc: Install the server and its dev tools into .venv (uv)
     cmds:
-      - echo "task setup is a stub — define your stack's install command here or in Taskfile.local.yml"
+      - uv sync
 
   update:
-    desc: Update dependencies (stub)
+    desc: Upgrade locked dependencies
     cmds:
-      - echo "task update is a stub — define your stack's update command"
+      - uv lock --upgrade
+      - uv sync
 
   lint:
-    desc: Run lint (stub)
+    desc: Lint the server (ruff) and syntax-check the UI (node)
     cmds:
-      - echo "task lint is a stub — define your stack's linter"
+      - uv run ruff check server tests/server
+      - uv run ruff format --check server tests/server
+      - node --check web/app.js
+      - node --check web/lib.js
 
   test:unit:
-    desc: Run unit tests (stub)
+    desc: Run the server (pytest) and UI helper (node --test) unit tests
     cmds:
-      - echo "task test:unit is a stub — define your stack's unit test command"
+      - uv run pytest -q
+      - node --test tests/web/*.test.mjs
 
   test:integration:
-    desc: Run integration tests (stub)
+    desc: No integration suite; the server is exercised end-to-end in test:unit
     cmds:
-      - echo "task test:integration is a stub — define your stack's integration test command"
+      - echo "no integration tests"
 
   build:
-    desc: Build artefacts (stub)
+    desc: Build the wheel
     cmds:
-      - echo "task build is a stub — define your stack's build command"
+      - uv build
 
   run:
-    desc: Run the application (stub)
+    desc: Start the server with ./config.json (or $REAPER_REMOTE_CONFIG)
     cmds:
-      - echo "task run is a stub — define your stack's run command"
+      - uv run reaper-remote
 
   # ---------------------------------------------------------------------------
   # Language-neutral quality gates (no delegation).

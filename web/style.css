@@ -1,0 +1,149 @@
+:root {
+  --bg: #111316;
+  --panel: #1b1e23;
+  --line: #2a2e35;
+  --text: #e6e8eb;
+  --muted: #8b929c;
+  --accent: #4fa3ff;
+  --on: #3ecf8e;
+  --warn: #ffb454;
+  --danger: #ff6b6b;
+}
+
+* { box-sizing: border-box; }
+
+/* Author `display` rules would otherwise override the hidden attribute. */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+button {
+  min-width: 44px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+button:active { background: var(--line); }
+button.toggle.on { border-color: var(--on); color: var(--on); }
+button.wide { font-size: 14px; }
+button:disabled { opacity: 0.5; }
+
+.position {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.position.playing { color: var(--on); }
+.muted { color: var(--muted); font-size: 12px; }
+.label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+.segmented {
+  display: flex;
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.segmented button {
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+  font-size: 13px;
+}
+
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button.on { background: var(--accent); color: #000; }
+
+.tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.track {
+  display: grid;
+  grid-template-columns: minmax(80px, 1.3fr) 32px 32px 2fr 44px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  position: relative;
+  overflow: hidden;
+}
+
+.track .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track.master .name { font-weight: 600; }
+
+.track button {
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.track button.mute.on { border-color: var(--danger); color: var(--danger); }
+.track button.solo.on { border-color: var(--warn); color: var(--warn); }
+
+.track input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+.track .db {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.track .meter {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 0;
+  background: var(--on);
+  transition: width 0.1s linear;
+}
+
+.track .meter.hot { background: var(--danger); }
+
+#render-audio { width: 100%; }
+
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}

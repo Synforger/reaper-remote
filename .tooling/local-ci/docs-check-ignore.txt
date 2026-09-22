@@ -12,3 +12,6 @@ task version:bump   # workflows/README: "derive per project when needed" example
 task release:cut    # same — intentionally hypothetical, not a stale reference
 task install:core   # back-port task lives in root Taskfile.yml at template state only (= not in post-init core Taskfile, so docs-check at template state can't see it)
 .tooling/versions.yaml  # README documents post-init layout; the file lives under _core/.tooling/ at template state and gets promoted to .tooling/ by `task init`
+./config.json         # the user's own config file; git-ignored, so it never exists in the repository
+text/plain            # MIME type in the HTTP API table, not a path
+SET/TRACK/1/VOL/0.5   # REAPER web interface command in the HTTP API table, not a path

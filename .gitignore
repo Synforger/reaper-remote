@@ -65,3 +65,6 @@ htmlcov/*
 
 # 個人情報を含む(派生時は手元で作成・.example を参考に)
 .tooling/local-ci/anon-words.txt
+
+# local config (= machine-specific device names and paths)
+/config.json

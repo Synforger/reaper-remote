@@ -1,12 +1,48 @@
 # Troubleshooting
 
-利用者向けのトラブルシュート / 運用 / 常駐 service 管理を書く section。 派生プロジェクトで具体内容を埋める。
+## The page shows `REAPER: REAPER web interface unreachable`
 
-## 推奨構成
+REAPER is not running, or its web interface is off or on another port.
+`curl 'http://127.0.0.1:8080/_/TRANSPORT'` on the Mac must print a
+`TRANSPORT` line; if it does not, enable the interface (Setup step 2) or fix
+`reaper_url`.
 
-- **troubleshoot.md** — よくある不具合 + 対処 (= 1 問題 1 section、 「症状」 → 「原因」 → 「対処」 の三段)
-- **runbook.md** — 日常運用 (= 起動 / 停止 / バックアップ / ログ確認 / アップデート)
-- **launchd-systemd.md** — 常駐 service として動かす場合の設定 (= launchd plist / systemd unit / pm2 ecosystem 等)
-- **backup.md** — 物理 backup の対象 file / 頻度 / 復元手順
+## Listen connects but stays silent
 
-運用 task (= 常駐の登録 / 再起動 / ログ確認) を `Taskfile.local.yml` に定義した場合、 ここから link する。
+- The Mac output is `headphones`, so nothing reaches BlackHole. Switch to
+  `multi` or `blackhole`.
+- REAPER is stopped. The stream carries digital silence until something plays.
+- The server lacks microphone permission, so macOS hands it zeros. Check
+  System Settings → Privacy & Security → Microphone for the app that started
+  the server (Terminal, or the launchd job's binary).
+
+Check the capture path without the phone:
+
+```bash
+curl -s -m 5 -o /tmp/probe.ogg http://127.0.0.1:8090/stream.ogg
+ffmpeg -i /tmp/probe.ogg -af volumedetect -f null - 2>&1 | grep max_volume
+```
+
+`max_volume` around `-91 dB` means silence reached the encoder.
+
+## Listen stops when the phone locks or the browser goes to the background
+
+Mobile browsers may suspend media in background tabs. Keep the page in the
+foreground, or add it to the home screen and check whether playback continues
+there.
+
+## The render button is missing
+
+There is no `render` block in `config.json`. See Setup step 5.
+
+## Render answers 504
+
+The action did not produce a file in `render.dir` within `render.timeout_s`.
+Check that `render.action` is the command ID of `reaper-remote-render.lua`
+(Actions → the action → *Copy selected action command ID*), and that REAPER
+has a render format configured (File → Render once by hand).
+
+## Opening the page at `/ext/reaper` (no trailing slash) shows a broken page
+
+The UI loads `app.js`, `style.css` and the API relative to the page URL, which
+needs the trailing slash. Open `/ext/reaper/`.

@@ -1,31 +1,27 @@
-# Roadmap — `{{repo_full_name}}`
+# Roadmap — Synforger/reaper-remote
 
-> 個人プロジェクトです。 「今安定して使えるのか / 何が作りかけか」 を判断するための一覧。
-> このファイルは `python personalize.py` で `{{repo_full_name}}` placeholder が置換される。
+> A personal project. This page says what works today and what is not planned.
 
-## いま使えること
+## Works today
 
-- (派生時に列挙)
+- Transport: play / pause / stop / go to start / repeat, with the current position
+- Per-track fader (dB), mute and solo, with a peak meter
+- Live Ogg/Opus stream of the Mac's output via a loopback device, encoded only while someone listens
+- Switching the Mac's system output between three configured devices
+- One-tap render of the time selection (or the whole project), playable in the page
+- Runs as an iframe under any path prefix (all URLs are relative)
 
-## 今後やる予定 (= committed)
+## Planned
 
-- (派生時に列挙)
+- Nothing committed yet.
 
-## 検討中 (= まだ着手していない、 仕様も未確定)
+## Not planned
 
-- (派生時に列挙)
+- Authentication inside the server: access control is Tailscale's job (see [SECURITY.md](SECURITY.md))
+- Windows / Linux: output switching and capture use macOS-only tools
+- A replacement for REAPER's own web interface pages: this is a small remote, not a full control surface
 
-## 採用しない方針 (= 過去に検討、 不採用判断、 再提案 NG)
+## Bug reports / feature requests
 
-- (派生時に列挙)
-
-## バグ報告 / 機能要望
-
-- セキュリティ脆弱性: [SECURITY.md](SECURITY.md)
-- 機能要望 / 一般バグ: GitHub Issues 経由で報告 (= PR も歓迎)。 ただし**個人プロジェクトなので応答は best effort**、 LTS 約束なし
-- 開発の方向性に直結する根本的な機能要望: 検討中 section の review trigger になる
-- 「自分で fork して直したい」 場合は LICENSE (Apache-2.0) の許諾範囲で自由
-
-## 過去の release
-
-各 release の note は GitHub Releases tab を参照。
+- Security issues: [SECURITY.md](SECURITY.md)
+- Everything else: GitHub Issues (pull requests welcome). Responses are best effort.

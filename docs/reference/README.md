@@ -1,12 +1,54 @@
 # Reference
 
-利用者向けの設定 / データスキーマ / API リファレンスを書く section。 派生プロジェクトで具体内容を埋める。
+## `config.json`
 
-## 推奨構成
+Read from `./config.json`, or from the path in `$REAPER_REMOTE_CONFIG`.
+Unknown keys are rejected at startup, so a typo fails loudly.
 
-- **config.md** — 設定 file (= `config.json` / `.env` 等) の全項目仕様、 default 値 + 許容範囲 + 例
-- **data-schema.md** — persist data の構造 (= sqlite / jsonl / dump 形式)、 例 + マイグレーション履歴
-- **api.md** — 公開 API がある場合の reference (= endpoint / params / response / status code)
-- **cli.md** — CLI 提供時の全 sub-command + flag
+| key | default | meaning |
+|---|---|---|
+| `host` | `127.0.0.1` | bind address. Keep loopback and publish with `tailscale serve` |
+| `port` | `8090` | bind port |
+| `reaper_url` | (required) | REAPER's web interface, e.g. `http://127.0.0.1:8080` |
+| `stream.input` | (required) | capture device name as ffmpeg's avfoundation sees it, e.g. `BlackHole 2ch` |
+| `stream.bitrate` | `128k` | Opus bitrate |
+| `stream.ffmpeg` | `ffmpeg` | ffmpeg binary (name on `PATH` or full path) |
+| `devices.headphones` | — | output device name for the `headphones` button |
+| `devices.multi` | — | output device name for the `multi` button |
+| `devices.blackhole` | — | output device name for the `blackhole` button |
+| `devices.switch_audio_source` | `SwitchAudioSource` | SwitchAudioSource binary |
+| `render.action` | (required in `render`) | command ID of `reaper/reaper-remote-render.lua` (`_RS…`) |
+| `render.dir` | (required in `render`) | directory the rendered files go to; `~` is expanded |
+| `render.timeout_s` | `600` | how long to wait for a render to finish |
 
-実装に変更が入ったら必ずここを更新する (= `task docs:check` が path 参照を機械検証してる)。
+A device key that is left out does not get a button. Without a `render` block
+the render button is hidden.
+
+## HTTP API
+
+All paths are relative to where the server is mounted.
+
+| method | path | response |
+|---|---|---|
+| `GET` | `/` | the UI |
+| `GET` | `/reaper/_/<commands>` | REAPER's web interface, passed through unchanged (`text/plain`, tab-separated lines). `<commands>` is `;`-separated, e.g. `TRANSPORT;TRACK` or `SET/TRACK/1/VOL/0.5`. See [the command list](https://github.com/ReaTeam/Doc/blob/master/web_interface_modding.md) |
+| `GET` | `/stream.ogg` | live Ogg/Opus stream of `stream.input`. The encoder starts when a listener connects and stops when it disconnects |
+| `GET` | `/device` | `{"current": "multi", "name": "<device name>", "options": ["headphones", "multi", "blackhole"]}`. `current` is `null` when the output is none of the configured devices |
+| `POST` | `/device` | body `{"device": "headphones" \| "multi" \| "blackhole"}`; switches the Mac's system output and returns the same shape as `GET` |
+| `GET` | `/render` | `{"enabled": true \| false}` |
+| `POST` | `/render` | renders and returns `{"name": "<file>", "url": "renders/<file>"}` once the file has stopped growing |
+| `GET` | `/renders/<file>` | a rendered file |
+
+Errors are JSON `{"detail": "..."}`:
+
+| status | when |
+|---|---|
+| `400` | `POST /device` with an unknown key |
+| `404` | device key or `render` not configured; unknown rendered file |
+| `409` | `POST /render` while another render is running |
+| `500` | ffmpeg or SwitchAudioSource missing or failing |
+| `502` | REAPER's web interface unreachable or erroring |
+| `504` | no rendered file appeared within `render.timeout_s` |
+
+There is no authentication in the server itself: it listens on loopback, and
+Tailscale decides who reaches it. See [SECURITY.md](../../SECURITY.md).

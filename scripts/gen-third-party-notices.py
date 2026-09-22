@@ -122,7 +122,7 @@ def render(rows: Iterable[dict[str, str]]) -> str:
         "# Third-Party Notices",
         "",
         "This file is **auto-generated** by `task gen-notices` (=",
-        "`_core/scripts/gen-third-party-notices.py`). Do not edit by hand;",
+        "`scripts/gen-third-party-notices.py`). Do not edit by hand;",
         "re-run the generator and commit the diff.",
         "",
         "| lang | package | version | license | source |",

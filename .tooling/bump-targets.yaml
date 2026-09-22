@@ -25,4 +25,8 @@
 
 current_version: 0.0.0
 
-targets: []
+targets:
+  - file: pyproject.toml
+    replacements:
+      - search: 'version = "{OLD}"'
+        replace: 'version = "{NEW}"'
