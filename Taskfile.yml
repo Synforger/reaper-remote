@@ -1,0 +1,39 @@
+# =============================================================================
+# personal-template / root Taskfile (= template state)
+# =============================================================================
+# At template state only `task init` is exposed. After init the real Taskfile
+# from `_core/Taskfile.yml` lands here and the full `task --list` becomes
+# available (= setup / lint / test / build / docs:check etc.).
+# =============================================================================
+
+version: '3'
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  init:
+    desc: Initialize this template for a new project (= promote _core/ to root)
+    cmds:
+      - python3 _core/scripts/init.py
+
+  install:core:
+    desc: Install _core machinery into another existing repo (= TARGET=/path, optional DRY_RUN=1)
+    vars:
+      TARGET: '{{.TARGET}}'
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - TARGET={{.TARGET}} DRY_RUN={{.DRY_RUN}} bash _core/scripts/install-core.sh
+
+
+  test:template:
+    desc: Run the template's own bats suite (brew install bats-core)
+    cmds:
+      - bats tests/
+
+  bootstrap:machine:
+    desc: Arm this machine (delegates to the guard-dispatcher checkout)
+    cmds:
+      - bash "$HOME/.git-hooks/scripts/bootstrap-machine.sh"

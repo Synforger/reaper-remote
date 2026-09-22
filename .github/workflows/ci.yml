@@ -1,0 +1,27 @@
+name: CI
+
+# Template-state self-check: run the template's own bats suite and the
+# docs gate on pull requests. Same visibility guard as the shipped
+# _core/.github/workflows/ci.yml — free on public, refuses on private.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install bats
+        run: sudo apt-get update -q && sudo apt-get install -y -q bats
+      - name: Template bats suite
+        run: bats tests/
+      - name: Docs gate
+        run: bash _core/.tooling/local-ci/docs-check.sh
