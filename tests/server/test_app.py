@@ -261,3 +261,25 @@ def test_missing_switch_tool_is_a_clean_500(make_client, raw_config, tmp_path) -
         for r in (c.get("/device"), c.post("/device", json={"device": "multi"})):
             assert r.status_code == 500
             assert r.json()["detail"].endswith("does-not-exist not found")
+
+
+def test_version_reports_a_ui_fingerprint_that_follows_the_files(tmp_path) -> None:
+    import shutil
+
+    from reaper_remote.app import ui_fingerprint
+
+    web = tmp_path / "web"
+    shutil.copytree(Path(__file__).resolve().parents[2] / "web", web)
+    before = ui_fingerprint(web)
+    assert before == ui_fingerprint(web)  # stable while nothing changes
+    (web / "app.js").write_text((web / "app.js").read_text() + "\n// changed\n")
+    assert ui_fingerprint(web) != before
+
+
+def test_version_route_and_ui_files_are_never_served_stale(client) -> None:
+    r = client.get("/version")
+    assert r.status_code == 200
+    assert len(r.json()["ui"]) == 16
+    assert r.headers["cache-control"] == "no-store"
+    for path in ("/", "/app.js", "/style.css"):
+        assert client.get(path).headers["cache-control"] == "no-cache"

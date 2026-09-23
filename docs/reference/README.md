@@ -33,7 +33,8 @@ All paths are relative to where the server is mounted.
 
 | method | path | response |
 |---|---|---|
-| `GET` | `/` | the UI |
+| `GET` | `/` | the UI (served with `Cache-Control: no-cache`) |
+| `GET` | `/version` | `{"ui": "<fingerprint>"}` — a hash of the UI files at start-up; open pages reload themselves when it changes (not while listening) |
 | `GET` | `/reaper/_/<commands>` | REAPER's web interface, passed through unchanged (`text/plain`, tab-separated lines). `<commands>` is `;`-separated, e.g. `TRANSPORT;TRACK` or `SET/TRACK/1/VOL/0.5`; a percent-encoded `%3B` (as some front proxies send it) is treated as `;` too. See [the command list](https://github.com/ReaTeam/Doc/blob/master/web_interface_modding.md) |
 | `POST` | `/whep` | WHEP offer (`application/sdp`), relayed to mediamtx; answers `201` with the SDP answer and `Location: whep/<session>` |
 | `PATCH`, `DELETE` | `/whep/<session>` | trickle ICE / end of a WHEP session, relayed to mediamtx |
