@@ -101,6 +101,10 @@ def test_encoders_capture_the_configured_input(raw_config, tmp_path) -> None:
     assert hls[hls.index("-c:a") + 1] == "aac"
     assert hls[hls.index("-f", hls.index("-c:a")) + 1] == "hls"
     assert hls[-1] == str(tmp_path / "stream.m3u8")
+    # Apple's HLS authoring spec for live playlists: at least six segments (8.11)
+    # and EXT-X-PROGRAM-DATE-TIME in every playlist (8.4).
+    assert int(hls[hls.index("-hls_list_size") + 1]) >= 6
+    assert "program_date_time" in hls[hls.index("-hls_flags") + 1]
 
 
 def _alive(pid: int) -> bool:

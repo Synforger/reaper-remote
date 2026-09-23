@@ -33,7 +33,7 @@ All paths are relative to where the server is mounted.
 | `GET` | `/` | the UI |
 | `GET` | `/reaper/_/<commands>` | REAPER's web interface, passed through unchanged (`text/plain`, tab-separated lines). `<commands>` is `;`-separated, e.g. `TRANSPORT;TRACK` or `SET/TRACK/1/VOL/0.5`; a percent-encoded `%3B` (as some front proxies send it) is treated as `;` too. See [the command list](https://github.com/ReaTeam/Doc/blob/master/web_interface_modding.md) |
 | `GET` | `/stream.ogg` | live Ogg/Opus stream of `stream.input` (1–3 s behind). One encoder is shared by every listener: it starts with the first and stops when the last disconnects. A listener joining mid-stream first receives the header pages |
-| `GET` | `/hls/stream.m3u8` | live HLS playlist of AAC segments of `stream.input` (4–8 s behind). The first request starts the encoder and waits for the first segment; the encoder stops when the playlist has not been requested for 20 s |
+| `GET` | `/hls/stream.m3u8` | live HLS playlist of AAC segments of `stream.input` (4–8 s behind), shaped to Apple's HLS authoring spec for live playlists (ten 2-second segments, `EXT-X-PROGRAM-DATE-TIME` on each). The first request starts the encoder and waits for the first segment; the encoder stops when the playlist has not been requested for 20 s |
 | `GET` | `/hls/<segment>.ts` | an HLS segment listed in the playlist |
 | `GET` | `/device` | `{"current": "multi", "name": "<device name>", "options": ["headphones", "multi", "blackhole"]}`. `current` is `null` when the output is none of the configured devices |
 | `POST` | `/device` | body `{"device": "headphones" \| "multi" \| "blackhole"}`; switches the Mac's system output and returns the same shape as `GET` |
