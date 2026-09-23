@@ -38,11 +38,14 @@ travels on UDP port 8189 of the Mac: check that mediamtx is running and that
 the port is reachable from the phone (on a tailnet it normally is). The
 mediamtx log shows each session and the candidate pair it used.
 
-## Audio stops when the phone locks or the browser goes to the background
+## Audio stops when the phone locks or the app goes to the background
 
-Mobile browsers may suspend media in background tabs. Keep the page in the
-foreground, or add it to the home screen and check whether playback continues
-there.
+That is by design: the page plays only while it is on screen. Going to the
+home screen, another app or the lock screen stops playback and ends the
+stream (the Mac stops capturing shortly after). Coming back resumes it when
+the output is still Multi or BlackHole; if the phone asks for a tap first,
+the dot stays grey until you tap Multi or BlackHole. Folding the host app's
+panel does not count as leaving: the page stays visible and keeps playing.
 
 ## Audio is choppy, or much shorter than real time
 
