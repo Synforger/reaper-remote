@@ -229,8 +229,11 @@ document.addEventListener("visibilitychange", () => {
 const audio = $("audio");
 let listening = false;
 
-function setListenStatus(text) {
-  $("listen-status").textContent = text;
+// The Listen button carries the state as its colour, and the words as its tooltip.
+function setListenStatus(state, text) {
+  const btn = $("btn-listen");
+  btn.dataset.state = state;
+  btn.title = `Listen: ${text}`;
 }
 
 // Prefer native HLS where the browser has it (Safari on iOS and macOS, recent
@@ -246,7 +249,7 @@ function streamUrl() {
 function startListening() {
   listening = true;
   $("btn-listen").classList.add("on");
-  setListenStatus("connecting…");
+  setListenStatus("connecting", "connecting…");
   audio.src = streamUrl();
   audio.play().catch((e) => {
     stopListening();
@@ -257,7 +260,7 @@ function startListening() {
 function stopListening() {
   listening = false;
   $("btn-listen").classList.remove("on");
-  setListenStatus("off");
+  setListenStatus("off", "off");
   audio.pause();
   // Dropping the source closes the connection, which stops the encoder on the server.
   audio.removeAttribute("src");
@@ -265,10 +268,11 @@ function stopListening() {
 }
 
 $("btn-listen").addEventListener("click", () => (listening ? stopListening() : startListening()));
-audio.addEventListener("playing", () =>
-  listening && setListenStatus(useHls ? "live (4–8 s behind)" : "live (1–3 s behind)"),
+audio.addEventListener(
+  "playing",
+  () => listening && setListenStatus("live", useHls ? "live, 4–8 s behind" : "live, 1–3 s behind"),
 );
-audio.addEventListener("waiting", () => listening && setListenStatus("buffering…"));
+audio.addEventListener("waiting", () => listening && setListenStatus("buffering", "buffering…"));
 audio.addEventListener("error", () => {
   if (!listening) return;
   stopListening();
@@ -289,7 +293,7 @@ async function loadDevices(state) {
       return b;
     }),
   );
-  $("output").hidden = data.options.length === 0;
+  box.hidden = data.options.length === 0;
 }
 
 async function setDevice(key) {
@@ -310,18 +314,17 @@ async function setDevice(key) {
 $("btn-render").addEventListener("click", async () => {
   const btn = $("btn-render");
   btn.disabled = true;
-  $("render-status").textContent = "rendering…";
+  btn.textContent = "…";
   try {
     const data = await (await request("render", { method: "POST" })).json();
-    $("render-status").textContent = "ready";
-    $("render-status").title = data.name;
+    btn.title = `Rendered: ${data.name}`;
     const player = $("render-audio");
     player.src = data.url;
     player.hidden = false;
   } catch (e) {
-    $("render-status").textContent = "";
     showError(`Render: ${e.message}`);
   } finally {
+    btn.textContent = "⤓";
     btn.disabled = false;
   }
 });
@@ -337,9 +340,9 @@ async function boot() {
   }
   // Render is optional: show the button only when the server has it configured.
   try {
-    $("render").hidden = !(await (await request("render")).json()).enabled;
+    $("btn-render").hidden = !(await (await request("render")).json()).enabled;
   } catch {
-    $("render").hidden = true;
+    $("btn-render").hidden = true;
   }
 }
 
