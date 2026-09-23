@@ -1,0 +1,56 @@
+# mediamtx configuration for reaper-remote.
+#
+# mediamtx distributes the live audio: WebRTC (WHEP) first, Low-Latency HLS as
+# the fallback. Its HTTP servers listen on loopback only; reaper-remote relays
+# the page's requests to them. Only WebRTC's UDP port faces the network, since
+# the audio itself travels there (e.g. over your tailnet).
+#
+# Copy to mediamtx.yml, replace /path/to/reaper-remote, and run
+# `mediamtx mediamtx.yml` (or install it as a login item, see docs/setup).
+
+logLevel: info
+
+# Services reaper-remote does not use.
+api: false
+metrics: false
+pprof: false
+playback: false
+rtmp: false
+srt: false
+moq: false
+
+# The publisher (below) pushes RTSP over TCP from this machine.
+rtsp: true
+rtspTransports: [tcp]
+rtspAddress: 127.0.0.1:8554
+
+# Low-Latency HLS, relayed by reaper-remote under llhls/.
+hls: true
+hlsAddress: 127.0.0.1:8888
+hlsVariant: lowLatency
+# Close an idle HLS muxer (and with it the publisher) soon after the last
+# listener, instead of the default 60 s.
+hlsMuxerCloseAfter: 10s
+
+# WebRTC: signalling (WHEP) relayed by reaper-remote under whep; media over UDP.
+webrtc: true
+webrtcAddress: 127.0.0.1:8889
+webrtcLocalUDPAddress: :8189
+
+# Only local clients (the publisher and reaper-remote's relay) may use the paths.
+authInternalUsers:
+  - user: any
+    ips: [127.0.0.1/32, ::1/128]
+    permissions:
+      - action: publish
+        path: reaper
+      - action: read
+        path: reaper
+
+paths:
+  reaper:
+    # Started when the first listener arrives, stopped (SIGINT) 10 s after the
+    # last one leaves. It captures the input device once and publishes Opus.
+    runOnDemand: /path/to/reaper-remote/.venv/bin/reaper-remote publish
+    runOnDemandRestart: yes
+    runOnDemandCloseAfter: 10s

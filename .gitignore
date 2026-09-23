@@ -68,3 +68,6 @@ htmlcov/*
 
 # local config (= machine-specific device names and paths)
 /config.json
+
+# local mediamtx config (= machine-specific paths)
+/mediamtx/mediamtx.yml

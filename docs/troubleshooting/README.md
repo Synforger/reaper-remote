@@ -12,27 +12,25 @@ REAPER is not running, or its web interface is off or on another port.
 - The Mac output is `headphones`, so nothing reaches BlackHole. Switch to
   `multi` or `blackhole`.
 - REAPER is stopped. The stream carries digital silence until something plays.
-- The server lacks microphone permission, so macOS hands it zeros. Check
-  System Settings → Privacy & Security → Microphone for the process that
-  captures: the server itself (Terminal, or the Python binary of the launchd
-  job).
+- The capturing process lacks microphone permission, so macOS hands it zeros.
+  mediamtx starts it, so check System Settings → Privacy & Security →
+  Microphone for what started mediamtx (Terminal, or the mediamtx binary of
+  the launchd job).
 
 Check the capture path without the phone:
 
 ```bash
-curl -s -m 5 -o /tmp/probe.ogg http://127.0.0.1:8090/stream.ogg
-ffmpeg -i /tmp/probe.ogg -af volumedetect -f null - 2>&1 | grep max_volume
+ffmpeg -i http://127.0.0.1:8090/llhls/index.m3u8 -t 5 -af volumedetect -f null - 2>&1 | grep max_volume
 ```
 
 `max_volume` around `-91 dB` means silence reached the encoder.
 
-## Audio on iPhone plays too fast or sounds folded
+## Listen stays yellow, or plays 1–2 s late instead of instantly
 
-That is iOS Safari playing the live Ogg/Opus stream. The page picks HLS
-whenever the browser supports it natively, so this only happens on an older
-page still cached in the browser: reload it. Check which stream a browser
-uses with `audio.canPlayType("application/vnd.apple.mpegurl")` (non-empty
-means HLS).
+WebRTC could not connect and the page fell back to Low-Latency HLS. The audio
+travels on UDP port 8189 of the Mac: check that mediamtx is running and that
+the port is reachable from the phone (on a tailnet it normally is). The
+mediamtx log shows each session and the candidate pair it used.
 
 ## Listen stops when the phone locks or the browser goes to the background
 

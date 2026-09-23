@@ -16,21 +16,26 @@ the same process works at `/` and under any path prefix.
 
 ```
 phone browser ──https──▶ tailscale serve ──▶ reaper-remote (127.0.0.1:8090)
-                                               ├─ /reaper/_/…  ─▶ REAPER web interface (127.0.0.1:8080)
-                                               ├─ /stream.ogg  ◀─ ffmpeg ◀─┐
-                                               ├─ /hls/…       ◀─ ffmpeg ◀─┴─ CoreAudio capture ◀─ BlackHole 2ch ◀─ Mac output
-                                               ├─ /device      ─▶ SwitchAudioSource (Mac system output)
-                                               └─ /render      ─▶ REAPER action (reaper/reaper-remote-render.lua)
+      │                                        ├─ /reaper/_/…  ─▶ REAPER web interface (127.0.0.1:8080)
+      │                                        ├─ /device      ─▶ SwitchAudioSource (Mac system output)
+      │                                        ├─ /render      ─▶ REAPER action (reaper/reaper-remote-render.lua)
+      │                                        └─ /whep, /llhls/… ─▶ mediamtx (127.0.0.1:8889 / 8888)
+      │                                                                 ▲ RTSP (Opus)
+      │                                                    reaper-remote publish ◀─ CoreAudio ◀─ BlackHole 2ch ◀─ Mac output
+      └──────── WebRTC audio (UDP 8189, over the tailnet) ◀── mediamtx
 ```
 
 - The server binds to loopback only. Reaching it from the phone is left to
   [Tailscale Serve](https://tailscale.com/kb/1312/serve), which also gives
   you HTTPS and limits access to your tailnet.
-- Audio is captured from a loopback device ([BlackHole](https://github.com/ExistentialAudio/BlackHole))
-  through CoreAudio (one capture, only while someone is listening) and handed
-  to the encoders untouched: no gain, limiting or resampling. Each format has
-  one encoder shared among all its listeners. Browsers with native HLS (Safari on iOS and macOS, recent Chrome)
-  get AAC over HLS, 4–8 seconds behind; others get Ogg/Opus, 1–3 seconds behind.
+- Live audio is distributed by [mediamtx](https://github.com/bluenviron/mediamtx):
+  WebRTC (WHEP) first, a fraction of a second behind, with Low-Latency HLS
+  (1–2 seconds) as the fallback. reaper-remote relays the signalling and the
+  playlists, so the page and its audio share one origin and one mount.
+- mediamtx starts `reaper-remote publish` when the first listener arrives and
+  stops it after the last one leaves. It captures the loopback device
+  ([BlackHole](https://github.com/ExistentialAudio/BlackHole)) through CoreAudio
+  and encodes it to Opus untouched: no gain, limiting or resampling.
 - REAPER follows the Mac's system output, so switching the output to a
   Multi-Output Device (headphones + BlackHole) lets you hear the mix locally
   and remotely at the same time.
@@ -38,13 +43,14 @@ phone browser ──https──▶ tailscale serve ──▶ reaper-remote (127.
 ## Requirements
 
 - macOS with REAPER, its web interface enabled (Preferences → Control/OSC/web → Add → Web browser interface)
-- [uv](https://docs.astral.sh/uv/), [ffmpeg](https://ffmpeg.org/) with libopus,
+- [uv](https://docs.astral.sh/uv/), [mediamtx](https://github.com/bluenviron/mediamtx),
+  [ffmpeg](https://ffmpeg.org/) with libopus,
   [SwitchAudioSource](https://github.com/deweller/switchaudio-osx),
   [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)
 - [Tailscale](https://tailscale.com/) on the Mac and the phone (for remote access)
 
 ```bash
-brew install uv ffmpeg switchaudio-osx blackhole-2ch go-task
+brew install uv mediamtx ffmpeg switchaudio-osx blackhole-2ch go-task
 ```
 
 ## Quick start
@@ -54,6 +60,8 @@ git clone https://github.com/Synforger/reaper-remote.git
 cd reaper-remote
 task setup                              # uv sync
 cp config.example.json config.json      # then fill in your device names
+cp mediamtx/mediamtx.example.yml mediamtx/mediamtx.yml   # then set the path to this checkout
+mediamtx mediamtx/mediamtx.yml &        # the audio distribution
 task run                                # serves http://127.0.0.1:8090/
 ```
 

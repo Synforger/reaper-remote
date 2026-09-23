@@ -1,4 +1,5 @@
-"""HTTP surface: REAPER proxy, live audio stream, output device, render, and the UI.
+"""HTTP surface: REAPER proxy, output device, render, the UI, and a thin
+same-origin relay to mediamtx for live audio (WHEP and LL-HLS).
 
 Every path is relative to wherever the app is mounted, so the same process
 works at `/` locally and at `/ext/reaper/` behind `tailscale serve --set-path`.
@@ -8,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shutil
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,18 +16,20 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .capture import Capture, OpenStream, open_coreaudio
 from .config import DEVICE_KEYS, Config
-from .stream import HLS_PLAYLIST, HlsSession, OggBroadcast
 
 log = logging.getLogger("reaper_remote")
 
 PROXY_PREFIX = "/reaper/_/"
 PROXY_TIMEOUT_S = 5.0
+# LL-HLS playlist requests block until the next part exists; allow for that.
+MEDIA_TIMEOUT_S = 30.0
+# Response headers worth passing back from mediamtx.
+MEDIA_HEADERS = ("content-type", "cache-control", "etag", "accept-patch", "link")
 RENDER_POLL_S = 0.5
 EXTSTATE_SECTION = "reaper_remote"
 
@@ -50,23 +52,18 @@ async def _run(*args: str) -> tuple[int, str, str]:
 def create_app(
     cfg: Config,
     reaper_transport: httpx.AsyncBaseTransport | None = None,
-    open_stream: OpenStream = open_coreaudio,
+    media_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
-    """Build the app. `reaper_transport` and `open_stream` replace REAPER and the
-    audio device (tests only)."""
+    """Build the app. The transports replace REAPER and mediamtx (tests only)."""
     client = httpx.AsyncClient(
         base_url=cfg.reaper_url, timeout=PROXY_TIMEOUT_S, transport=reaper_transport
     )
-
-    capture = Capture(cfg.stream.input, open_stream)
-    ogg = OggBroadcast(cfg, capture)
-    hls = HlsSession(cfg, capture)
+    media = httpx.AsyncClient(timeout=MEDIA_TIMEOUT_S, transport=media_transport)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
-        await hls.close()
-        await ogg.close()
+        await media.aclose()
         await client.aclose()
 
     app = FastAPI(
@@ -104,53 +101,62 @@ def create_app(
         body = await reaper(commands)
         return Response(body, media_type="text/plain", headers={"Cache-Control": "no-store"})
 
-    # -- live audio -----------------------------------------------------------
-    @app.get("/stream.ogg")
-    async def stream_ogg() -> StreamingResponse:
-        # One shared encoder for every listener; it stops with the last one.
-        if shutil.which(cfg.stream.ffmpeg) is None:
-            raise HTTPException(500, f"ffmpeg not found: {cfg.stream.ffmpeg}")
-        pages = ogg.listen()
+    # -- live audio: relayed to mediamtx ----------------------------------------
+    # mediamtx listens on loopback only; these routes put WHEP signalling and
+    # LL-HLS under this app's own path, so a single mount (and a single origin)
+    # serves the page and its audio. The media itself flows over WebRTC's own
+    # UDP port, not through here.
+    whep_url = f"{cfg.media.webrtc}/{cfg.media.path}/whep"
+    hls_url = f"{cfg.media.hls}/{cfg.media.path}"
+
+    async def relay(method: str, url: str, request: Request) -> httpx.Response:
+        headers = {
+            k: v for k, v in request.headers.items() if k.lower() in ("content-type", "if-match")
+        }
         try:
-            # Start the generator here so a missing device is a clean 500,
-            # and so its clean-up is guaranteed to run later.
-            first = await anext(pages)
-        except LookupError as e:
-            raise HTTPException(500, str(e)) from e
-        except StopAsyncIteration as e:
-            raise HTTPException(500, "the encoder stopped before producing audio") from e
+            return await media.request(
+                method,
+                url,
+                params=request.query_params,
+                headers=headers,
+                content=await request.body(),
+            )
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"mediamtx unreachable: {e}") from e
 
-        async def body():
-            yield first
-            async for page in pages:
-                yield page
+    def passthrough(r: httpx.Response, extra: dict[str, str] | None = None) -> Response:
+        headers = {k: v for k, v in r.headers.items() if k.lower() in MEDIA_HEADERS}
+        headers.update(extra or {})
+        return Response(r.content, status_code=r.status_code, headers=headers)
 
-        return StreamingResponse(
-            body(), media_type="audio/ogg", headers={"Cache-Control": "no-store"}
-        )
+    @app.post("/whep")
+    async def whep_offer(request: Request) -> Response:
+        r = await relay("POST", whep_url, request)
+        extra = {}
+        if "location" in r.headers:
+            # mediamtx answers `/<path>/whep/<session>`; hand back a URL relative
+            # to this app so the page can PATCH / DELETE the session through us.
+            session = r.headers["location"].split("?")[0].rsplit("/", 1)[-1]
+            extra["Location"] = f"whep/{session}"
+        return passthrough(r, extra)
 
-    @app.get("/hls/" + HLS_PLAYLIST)
-    async def hls_playlist() -> FileResponse:
-        if shutil.which(cfg.stream.ffmpeg) is None:
-            raise HTTPException(500, f"ffmpeg not found: {cfg.stream.ffmpeg}")
-        try:
-            path = await hls.playlist()
-        except LookupError as e:
-            raise HTTPException(500, str(e)) from e
-        if path is None:
-            raise HTTPException(503, "the HLS encoder did not produce a playlist")
-        return FileResponse(
-            path,
-            media_type="application/vnd.apple.mpegurl",
-            headers={"Cache-Control": "no-store"},
-        )
+    @app.api_route("/whep/{session}", methods=["PATCH", "DELETE"])
+    async def whep_session(session: str, request: Request) -> Response:
+        return passthrough(await relay(request.method, f"{whep_url}/{quote(session)}", request))
 
-    @app.get("/hls/{name}")
-    async def hls_segment(name: str) -> FileResponse:
-        path = hls.segment(name)
-        if path is None:
-            raise HTTPException(404)
-        return FileResponse(path, media_type="video/mp2t")
+    @app.get("/llhls/{name:path}")
+    async def llhls(name: str, request: Request) -> Response:
+        r = await relay("GET", f"{hls_url}/{name}", request)
+        extra = {}
+        if "location" in r.headers:
+            # mediamtx first redirects the playlist to `/<path>/index.m3u8?cookieCheck=1`.
+            # No cookies are relayed, so it then carries the session in the query
+            # string of every URL it hands out; only the redirect needs rewriting,
+            # to stay under llhls/.
+            prefix = f"/{cfg.media.path}/"
+            location = r.headers["location"]
+            extra["Location"] = location.removeprefix(prefix)
+        return passthrough(r, extra)
 
     # -- system output device -------------------------------------------------
     async def switch_tool(*args: str) -> str:

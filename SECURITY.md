@@ -43,6 +43,11 @@ own devices over their tailnet.
 - REAPER's own web interface (default port 8080) also has no authentication
   unless you set one, and listens on all interfaces. reaper-remote only needs
   it on loopback.
+- mediamtx's HTTP servers listen on loopback and only local clients may read or
+  publish its path (`authInternalUsers` in the example config); the page
+  reaches them through reaper-remote. WebRTC's UDP port (8189) listens on all
+  interfaces, since the audio travels there; a session on it exists only
+  after a WHEP exchange through reaper-remote.
 - Commands sent to `/reaper/_/` are passed to REAPER unchanged; the server
   does not filter them. Rendered files are served only from `render.dir`.
 

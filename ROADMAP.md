@@ -6,7 +6,7 @@
 
 - Transport: play / pause / stop / go to start / repeat, with the current position
 - Per-track fader (dB), mute and solo, with a peak meter
-- Live Ogg/Opus stream of the Mac's output via a loopback device, encoded only while someone listens
+- Live audio of the Mac's output through mediamtx: WebRTC first (well under a second behind), Low-Latency HLS as the fallback; captured only while someone listens, never altered
 - Switching the Mac's system output between three configured devices
 - One-tap render of the time selection (or the whole project), playable in the page
 - Runs as an iframe under any path prefix (all URLs are relative)

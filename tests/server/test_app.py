@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import os
 import threading
 import time
 from pathlib import Path
 
-from reaper_remote import stream
+import pytest
+from conftest import FakeDevice
+
 from reaper_remote.config import parse
-from reaper_remote.stream import hls_args, ogg_args, split_pages
+from reaper_remote.publish import default_url, publish, publish_args
 
 # -- proxy ------------------------------------------------------------------
 
@@ -102,170 +103,92 @@ def test_device_tool_failure_is_surfaced(client) -> None:
 # -- stream -----------------------------------------------------------------
 
 
-def test_encoders_read_the_capture_untouched(raw_config, tmp_path) -> None:
-    cfg = parse(raw_config)
-    ogg, hls = ogg_args(cfg, 44100), hls_args(cfg, 44100, tmp_path)
-    for args in (ogg, hls):
-        i = args.index("-i")
-        assert args[i - 6 : i + 2] == ["-f", "f32le", "-ar", "44100", "-ac", "2", "-i", "pipe:0"]
-        # The owner's rule: the sound is never altered. No filters, no gain,
-        # no resampling or channel changes after the input.
-        after = args[i + 2 :]
-        for banned in ("-af", "-filter:a", "-filter_complex", "-ar", "-ac", "-vol"):
-            assert banned not in after, f"{banned} would alter the audio"
-        assert not any("volume" in a or "limit" in a or "loudnorm" in a for a in after)
-    assert ogg[ogg.index("-c:a") + 1] == "libopus"
-    assert ogg[-1] == "pipe:1"
-    assert hls[hls.index("-c:a") + 1] == "aac"
-    assert hls[hls.index("-f", hls.index("-c:a")) + 1] == "hls"
-    assert hls[-1] == str(tmp_path / "stream.m3u8")
-    # Apple's HLS authoring spec for live playlists: at least six segments (8.11)
-    # and EXT-X-PROGRAM-DATE-TIME in every playlist (8.4).
-    assert int(hls[hls.index("-hls_list_size") + 1]) >= 6
-    assert "program_date_time" in hls[hls.index("-hls_flags") + 1]
+def test_publisher_encodes_the_capture_untouched(raw_config) -> None:
+    args = publish_args(parse(raw_config), 48000, "rtsp://127.0.0.1:8554/reaper")
+    i = args.index("-i")
+    assert args[i - 6 : i + 2] == ["-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "pipe:0"]
+    # The owner's rule: the sound is never altered. No filters, no gain,
+    # no resampling or channel changes after the input.
+    after = args[i + 2 :]
+    for banned in ("-af", "-filter:a", "-filter_complex", "-ar", "-ac", "-vol"):
+        assert banned not in after, f"{banned} would alter the audio"
+    assert not any("volume" in a or "limit" in a or "loudnorm" in a for a in after)
+    assert args[args.index("-c:a") + 1] == "libopus"
+    assert args[-3:] == ["-rtsp_transport", "tcp", "rtsp://127.0.0.1:8554/reaper"]
 
 
-def test_capture_pcm_reaches_the_encoder(client, tools, device) -> None:
-    with client.stream("GET", "/stream.ogg") as r:
-        chunks = r.iter_bytes()
-        next(chunks)
-        deadline = time.time() + 3
-        while time.time() < deadline and tools["pcmfile"].stat().st_size < 4096:
-            next(chunks)
-        assert tools["pcmfile"].read_bytes()[:8] == b"\x01\x02\x03\x04" * 2
-        args = tools["argsfile"].read_text().split()
-        assert args[args.index("-ar") + 1] == "44100"  # the device's own rate
+def test_publisher_pipes_pcm_to_ffmpeg_and_releases_the_device(raw_config, tools, device):
+    assert publish(parse(raw_config), "rtsp://x/reaper", open_stream=device.open) == 0
+    assert tools["pcmfile"].read_bytes() == FakeDevice.BLOCK * (8192 // len(FakeDevice.BLOCK))
+    args = tools["argsfile"].read_text().split()
+    assert args[args.index("-ar") + 1] == "48000"  # the device's own rate
+    assert device.running == 0
 
 
-def test_ogg_and_hls_share_one_device_stream(client, device) -> None:
-    with client.stream("GET", "/stream.ogg") as r:
-        chunks = r.iter_bytes()
-        next(chunks)
-        assert client.get("/hls/stream.m3u8").status_code == 200
-        assert device.opened == 1 and device.running == 1
-        next(chunks)
+def test_publisher_refuses_a_rate_opus_would_resample(raw_config, device, monkeypatch) -> None:
+    monkeypatch.setattr(FakeDevice, "RATE", 44100)
+    with pytest.raises(SystemExit, match="44100 Hz"):
+        publish(parse(raw_config), "rtsp://x/reaper", open_stream=device.open)
+    assert device.running == 0
 
 
-def test_device_stream_stops_with_the_last_encoder(make_client, raw_config, device, monkeypatch):
-    monkeypatch.setattr(stream, "HLS_IDLE_S", 1.5)
-    with make_client(raw_config) as c:
-        assert c.get("/hls/stream.m3u8").status_code == 200
-        assert device.running == 1
-        deadline = time.time() + 5
-        while device.running and time.time() < deadline:
-            time.sleep(0.05)
-        assert device.running == 0
+def test_publisher_takes_its_url_from_mediamtx(monkeypatch) -> None:
+    monkeypatch.setenv("RTSP_PORT", "8554")
+    monkeypatch.setenv("MTX_PATH", "reaper")
+    assert default_url() == "rtsp://127.0.0.1:8554/reaper"
+    monkeypatch.delenv("MTX_PATH")
+    with pytest.raises(SystemExit):
+        default_url()
 
 
-def test_missing_capture_device_is_a_clean_500(make_client, raw_config, device) -> None:
-    device.missing = True
-    with make_client(raw_config) as c:
-        for path in ("/stream.ogg", "/hls/stream.m3u8"):
-            r = c.get(path)
-            assert r.status_code == 500
-            assert "no input device named" in r.json()["detail"]
+# -- mediamtx relay ------------------------------------------------------------
 
 
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
+def test_whep_offer_is_relayed_and_the_session_url_made_relative(client, media) -> None:
+    r = client.post("/whep", content="v=0 offer", headers={"Content-Type": "application/sdp"})
+    assert r.status_code == 201
+    assert r.text == "v=0 answer"
+    assert r.headers["content-type"] == "application/sdp"
+    assert r.headers["location"] == "whep/3f2a-session"
+    assert "set-cookie" not in r.headers  # only the headers WHEP needs pass through
+    sent = media.requests[-1]
+    assert (sent.method, sent.url.host, sent.url.port) == ("POST", "127.0.0.1", 8889)
+    assert sent.url.path == "/reaper/whep"
+    assert sent.content == b"v=0 offer"
+    assert sent.headers["content-type"] == "application/sdp"
 
 
-def _pids(tools) -> list[int]:
-    return [int(x) for x in tools["pidfile"].read_text().split()]
+def test_whep_session_delete_reaches_mediamtx(client, media) -> None:
+    assert client.delete("/whep/3f2a-session").status_code == 200
+    assert media.requests[-1].method == "DELETE"
+    assert media.requests[-1].url.path == "/reaper/whep/3f2a-session"
 
 
-def _wait_dead(pid: int) -> bool:
-    deadline = time.time() + 5
-    while _alive(pid) and time.time() < deadline:
-        time.sleep(0.05)
-    return not _alive(pid)
+def test_llhls_redirect_stays_under_the_relay(client, media) -> None:
+    r = client.get("/llhls/index.m3u8", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"] == "index.m3u8?cookieCheck=1"
+    followed = client.get("/llhls/index.m3u8", follow_redirects=True)
+    assert followed.status_code == 200
+    assert "session=abc" in followed.text  # mediamtx's session rides in the query
+    assert all("cookie" not in req.headers for req in media.requests)
 
 
-def test_ogg_listeners_share_one_encoder_and_each_gets_the_header(client, tools) -> None:
-    header = (tools["pidfile"].parent / "ogg-header.bin").read_bytes()
-    assert not tools["pidfile"].exists()  # nothing encodes before a listener arrives
-    # Hold on to the iterators: a discarded one is closed at once, which
-    # closes the response and hangs up on the server.
-    with client.stream("GET", "/stream.ogg") as a:
-        assert a.headers["content-type"] == "audio/ogg"
-        chunks_a = a.iter_bytes()
-        got_a = next(chunks_a)
-        while len(got_a) < len(header) + 1:
-            got_a += next(chunks_a)
-        assert got_a.startswith(header)
-        # A second listener (Safari opens two per play) joins mid-stream.
-        with client.stream("GET", "/stream.ogg") as b:
-            chunks_b = b.iter_bytes()
-            got_b = next(chunks_b)
-            while len(got_b) < len(header) + 1:
-                got_b += next(chunks_b)
-            assert got_b.startswith(header)
-            assert b"audio-" in got_b[len(header) :] + next(chunks_b)
-            assert len(_pids(tools)) == 1
-        (pid,) = _pids(tools)
-        assert b"audio-" in next(chunks_a)  # the first listener keeps streaming
-        assert _alive(pid)
-    assert _wait_dead(pid)  # the last listener leaving stops the encoder
-
-
-def test_split_pages_resyncs_and_keeps_partial_pages() -> None:
-    from conftest import ogg_page
-
-    page = ogg_page(0, b"x" * 10)
-    buf = bytearray(b"junk" + page + page[:5])
-    assert split_pages(buf) == [page]
-    assert bytes(buf) == page[:5]
-    buf += page[5:]
-    assert split_pages(buf) == [page]
-    assert buf == bytearray()
-
-
-def test_hls_playlist_starts_one_encoder_and_serves_segments(client, tools) -> None:
-    r = client.get("/hls/stream.m3u8")
+def test_llhls_is_relayed_with_its_blocking_query(client, media) -> None:
+    r = client.get(
+        "/llhls/index.m3u8", params={"cookieCheck": "1", "_HLS_msn": "5", "_HLS_part": "1"}
+    )
     assert r.status_code == 200
-    assert r.headers["content-type"].startswith("application/vnd.apple.mpegurl")
-    assert "#EXTM3U" in r.text
-    seg = next(line for line in r.text.splitlines() if line.endswith(".ts"))
-    s = client.get(f"/hls/{seg}")
-    assert s.status_code == 200
-    assert s.content.startswith(b"segment-")
-    assert client.get("/hls/stream.m3u8").status_code == 200
-    assert len(_pids(tools)) == 1  # polling the playlist reuses the encoder
-    assert client.get("/hls/..%2Fsecret.ts").status_code == 404
-    assert client.get("/hls/nope.ts").status_code == 404
+    assert r.headers["content-type"] == "application/vnd.apple.mpegurl"
+    sent = media.requests[-1]
+    assert (sent.url.port, sent.url.path) == (8888, "/reaper/index.m3u8")
+    assert dict(sent.url.params) == {"cookieCheck": "1", "_HLS_msn": "5", "_HLS_part": "1"}
 
 
-def test_hls_encoder_stops_when_nobody_polls(make_client, raw_config, tools, monkeypatch) -> None:
-    monkeypatch.setattr(stream, "HLS_IDLE_S", 1.5)
-    with make_client(raw_config) as c:
-        assert c.get("/hls/stream.m3u8").status_code == 200
-        (pid,) = _pids(tools)
-        assert _wait_dead(pid)
-        # The next poll starts a fresh encoder.
-        assert c.get("/hls/stream.m3u8").status_code == 200
-        assert len(_pids(tools)) == 2
-
-
-def test_hls_idle_watchdog_spares_a_request_waiting_for_the_first_playlist(
-    make_client, raw_config, tools, monkeypatch
-) -> None:
-    # The first playlist can take longer than the idle window (first segment).
-    monkeypatch.setattr(stream, "HLS_IDLE_S", 0.2)
-    slow = tools["ffmpeg"].read_text().replace("    i=0\n", "    i=0\n    sleep 1\n", 1)
-    tools["ffmpeg"].write_text(slow)
-    with make_client(raw_config) as c:
-        assert c.get("/hls/stream.m3u8").status_code == 200
-
-
-def test_missing_ffmpeg_is_a_clean_500(make_client, raw_config, tmp_path) -> None:
-    raw_config["stream"]["ffmpeg"] = str(tmp_path / "no-ffmpeg")
-    with make_client(raw_config) as c:
-        assert c.get("/stream.ogg").status_code == 500
-        assert c.get("/hls/stream.m3u8").status_code == 500
+def test_mediamtx_down_is_a_502(client, media) -> None:
+    media.down = True
+    assert client.post("/whep", content="v=0").status_code == 502
+    assert client.get("/llhls/index.m3u8").status_code == 502
 
 
 # -- render -----------------------------------------------------------------
