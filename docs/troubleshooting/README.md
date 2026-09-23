@@ -13,8 +13,9 @@ REAPER is not running, or its web interface is off or on another port.
   `multi` or `blackhole`.
 - REAPER is stopped. The stream carries digital silence until something plays.
 - The server lacks microphone permission, so macOS hands it zeros. Check
-  System Settings → Privacy & Security → Microphone for the app that started
-  the server (Terminal, or the launchd job's binary).
+  System Settings → Privacy & Security → Microphone for the process that
+  captures: the server itself (Terminal, or the Python binary of the launchd
+  job).
 
 Check the capture path without the phone:
 
@@ -38,6 +39,14 @@ means HLS).
 Mobile browsers may suspend media in background tabs. Keep the page in the
 foreground, or add it to the home screen and check whether playback continues
 there.
+
+## Audio is choppy, or much shorter than real time
+
+The capture must not drop samples. reaper-remote reads the device through
+CoreAudio for this reason: ffmpeg's avfoundation input was measured keeping
+only about 1.3 s of every 8.6 s from a loopback device while REAPER played.
+If you changed `stream.input`, check that the name matches the input device
+in Audio MIDI Setup exactly.
 
 ## An output button is greyed out
 

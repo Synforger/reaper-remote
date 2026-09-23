@@ -17,8 +17,8 @@ the same process works at `/` and under any path prefix.
 ```
 phone browser ──https──▶ tailscale serve ──▶ reaper-remote (127.0.0.1:8090)
                                                ├─ /reaper/_/…  ─▶ REAPER web interface (127.0.0.1:8080)
-                                               ├─ /stream.ogg  ◀─ ffmpeg ◀─ BlackHole 2ch ◀─ Mac output
-                                               ├─ /hls/…       ◀─ ffmpeg ◀─ (same capture, for HLS players)
+                                               ├─ /stream.ogg  ◀─ ffmpeg ◀─┐
+                                               ├─ /hls/…       ◀─ ffmpeg ◀─┴─ CoreAudio capture ◀─ BlackHole 2ch ◀─ Mac output
                                                ├─ /device      ─▶ SwitchAudioSource (Mac system output)
                                                └─ /render      ─▶ REAPER action (reaper/reaper-remote-render.lua)
 ```
@@ -27,8 +27,9 @@ phone browser ──https──▶ tailscale serve ──▶ reaper-remote (127.
   [Tailscale Serve](https://tailscale.com/kb/1312/serve), which also gives
   you HTTPS and limits access to your tailnet.
 - Audio is captured from a loopback device ([BlackHole](https://github.com/ExistentialAudio/BlackHole))
-  and encoded only while someone is listening, by one encoder shared among all
-  listeners. Browsers with native HLS (Safari on iOS and macOS, recent Chrome)
+  through CoreAudio (one capture, only while someone is listening) and handed
+  to the encoders untouched: no gain, limiting or resampling. Each format has
+  one encoder shared among all its listeners. Browsers with native HLS (Safari on iOS and macOS, recent Chrome)
   get AAC over HLS, 4–8 seconds behind; others get Ogg/Opus, 1–3 seconds behind.
 - REAPER follows the Mac's system output, so switching the output to a
   Multi-Output Device (headphones + BlackHole) lets you hear the mix locally

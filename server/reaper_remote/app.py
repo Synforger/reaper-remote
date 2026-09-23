@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .capture import Capture, OpenStream, open_coreaudio
 from .config import DEVICE_KEYS, Config
 from .stream import HLS_PLAYLIST, HlsSession, OggBroadcast
 
@@ -46,19 +47,26 @@ async def _run(*args: str) -> tuple[int, str, str]:
     return proc.returncode or 0, out.decode().strip(), err.decode().strip()
 
 
-def create_app(cfg: Config, reaper_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
-    """Build the app. `reaper_transport` replaces the network path to REAPER (tests only)."""
+def create_app(
+    cfg: Config,
+    reaper_transport: httpx.AsyncBaseTransport | None = None,
+    open_stream: OpenStream = open_coreaudio,
+) -> FastAPI:
+    """Build the app. `reaper_transport` and `open_stream` replace REAPER and the
+    audio device (tests only)."""
     client = httpx.AsyncClient(
         base_url=cfg.reaper_url, timeout=PROXY_TIMEOUT_S, transport=reaper_transport
     )
 
-    ogg = OggBroadcast(cfg)
-    hls = HlsSession(cfg)
+    capture = Capture(cfg.stream.input, open_stream)
+    ogg = OggBroadcast(cfg, capture)
+    hls = HlsSession(cfg, capture)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
         await hls.close()
+        await ogg.close()
         await client.aclose()
 
     app = FastAPI(
@@ -102,15 +110,33 @@ def create_app(cfg: Config, reaper_transport: httpx.AsyncBaseTransport | None = 
         # One shared encoder for every listener; it stops with the last one.
         if shutil.which(cfg.stream.ffmpeg) is None:
             raise HTTPException(500, f"ffmpeg not found: {cfg.stream.ffmpeg}")
+        pages = ogg.listen()
+        try:
+            # Start the generator here so a missing device is a clean 500,
+            # and so its clean-up is guaranteed to run later.
+            first = await anext(pages)
+        except LookupError as e:
+            raise HTTPException(500, str(e)) from e
+        except StopAsyncIteration as e:
+            raise HTTPException(500, "the encoder stopped before producing audio") from e
+
+        async def body():
+            yield first
+            async for page in pages:
+                yield page
+
         return StreamingResponse(
-            ogg.listen(), media_type="audio/ogg", headers={"Cache-Control": "no-store"}
+            body(), media_type="audio/ogg", headers={"Cache-Control": "no-store"}
         )
 
     @app.get("/hls/" + HLS_PLAYLIST)
     async def hls_playlist() -> FileResponse:
         if shutil.which(cfg.stream.ffmpeg) is None:
             raise HTTPException(500, f"ffmpeg not found: {cfg.stream.ffmpeg}")
-        path = await hls.playlist()
+        try:
+            path = await hls.playlist()
+        except LookupError as e:
+            raise HTTPException(500, str(e)) from e
         if path is None:
             raise HTTPException(503, "the HLS encoder did not produce a playlist")
         return FileResponse(

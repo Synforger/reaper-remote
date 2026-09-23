@@ -78,8 +78,9 @@ task run
 
 Open `http://127.0.0.1:8090/` on the Mac to check.
 
-The first time the stream is opened, macOS asks whether the terminal (or
-whatever launched the server) may use the microphone. Allow it: BlackHole is
+The first time the stream is opened, macOS asks whether the server's process
+(the terminal, or the Python binary when launchd starts it) may use the
+microphone. Allow it: BlackHole is
 an input device, and without that permission the stream is silent.
 
 ## 7. Reach it from the phone
