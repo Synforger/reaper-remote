@@ -5,8 +5,9 @@ import threading
 import time
 from pathlib import Path
 
-from reaper_remote.app import ffmpeg_args
+from reaper_remote import stream
 from reaper_remote.config import parse
+from reaper_remote.stream import hls_args, ogg_args, split_pages
 
 # -- proxy ------------------------------------------------------------------
 
@@ -17,6 +18,13 @@ def test_proxy_passes_commands_through_verbatim(client, reaper) -> None:
     assert r.text.startswith("TRANSPORT\t0")
     assert reaper.requests == ["/_/TRANSPORT;SET/EXTSTATE/a/b/c%2Fd;TRACK/0-3"]
     assert r.headers["cache-control"] == "no-store"
+
+
+def test_proxy_turns_an_encoded_separator_back_into_a_semicolon(client, reaper) -> None:
+    # tailscale serve forwards `;` as `%3B`; REAPER answers nothing to that.
+    assert client.get("/reaper/_/TRANSPORT%3BTRACK").status_code == 200
+    assert client.get("/reaper/_/NTRACK%3btrack").status_code == 200
+    assert reaper.requests == ["/_/TRANSPORT;TRACK", "/_/NTRACK;track"]
 
 
 def test_proxy_reports_reaper_errors_as_502(client, reaper) -> None:
@@ -83,12 +91,16 @@ def test_device_tool_failure_is_surfaced(client) -> None:
 # -- stream -----------------------------------------------------------------
 
 
-def test_ffmpeg_captures_configured_input_as_ogg_opus(raw_config) -> None:
-    args = ffmpeg_args(parse(raw_config))
-    assert args[args.index("-i") + 1] == ":Capture Device"
-    assert args[args.index("-c:a") + 1] == "libopus"
-    assert args[args.index("-f", args.index("-c:a")) + 1] == "ogg"
-    assert args[-1] == "pipe:1"
+def test_encoders_capture_the_configured_input(raw_config, tmp_path) -> None:
+    cfg = parse(raw_config)
+    ogg = ogg_args(cfg)
+    assert ogg[ogg.index("-i") + 1] == ":Capture Device"
+    assert ogg[ogg.index("-c:a") + 1] == "libopus"
+    assert ogg[-1] == "pipe:1"
+    hls = hls_args(cfg, tmp_path)
+    assert hls[hls.index("-c:a") + 1] == "aac"
+    assert hls[hls.index("-f", hls.index("-c:a")) + 1] == "hls"
+    assert hls[-1] == str(tmp_path / "stream.m3u8")
 
 
 def _alive(pid: int) -> bool:
@@ -99,22 +111,87 @@ def _alive(pid: int) -> bool:
     return True
 
 
-def test_stream_starts_encoder_on_connect_and_kills_it_on_disconnect(client, tools) -> None:
-    assert not tools["pidfile"].exists()  # nothing encodes before a listener arrives
-    with client.stream("GET", "/stream.ogg") as r:
-        assert r.status_code == 200
-        assert r.headers["content-type"] == "audio/ogg"
-        # Hold on to the iterator: a discarded one is closed at once, which
-        # closes the response and would hang up on the server.
-        chunks = r.iter_bytes()
-        assert next(chunks).startswith(b"OggS-fake-header")
-        pid = int(tools["pidfile"].read_text())
-        assert b"chunk" in next(chunks)  # still streaming while connected
-        assert _alive(pid)
+def _pids(tools) -> list[int]:
+    return [int(x) for x in tools["pidfile"].read_text().split()]
+
+
+def _wait_dead(pid: int) -> bool:
     deadline = time.time() + 5
     while _alive(pid) and time.time() < deadline:
         time.sleep(0.05)
-    assert not _alive(pid)
+    return not _alive(pid)
+
+
+def test_ogg_listeners_share_one_encoder_and_each_gets_the_header(client, tools) -> None:
+    header = (tools["pidfile"].parent / "ogg-header.bin").read_bytes()
+    assert not tools["pidfile"].exists()  # nothing encodes before a listener arrives
+    # Hold on to the iterators: a discarded one is closed at once, which
+    # closes the response and hangs up on the server.
+    with client.stream("GET", "/stream.ogg") as a:
+        assert a.headers["content-type"] == "audio/ogg"
+        chunks_a = a.iter_bytes()
+        got_a = next(chunks_a)
+        while len(got_a) < len(header) + 1:
+            got_a += next(chunks_a)
+        assert got_a.startswith(header)
+        # A second listener (Safari opens two per play) joins mid-stream.
+        with client.stream("GET", "/stream.ogg") as b:
+            chunks_b = b.iter_bytes()
+            got_b = next(chunks_b)
+            while len(got_b) < len(header) + 1:
+                got_b += next(chunks_b)
+            assert got_b.startswith(header)
+            assert b"audio-" in got_b[len(header) :] + next(chunks_b)
+            assert len(_pids(tools)) == 1
+        (pid,) = _pids(tools)
+        assert b"audio-" in next(chunks_a)  # the first listener keeps streaming
+        assert _alive(pid)
+    assert _wait_dead(pid)  # the last listener leaving stops the encoder
+
+
+def test_split_pages_resyncs_and_keeps_partial_pages() -> None:
+    from conftest import ogg_page
+
+    page = ogg_page(0, b"x" * 10)
+    buf = bytearray(b"junk" + page + page[:5])
+    assert split_pages(buf) == [page]
+    assert bytes(buf) == page[:5]
+    buf += page[5:]
+    assert split_pages(buf) == [page]
+    assert buf == bytearray()
+
+
+def test_hls_playlist_starts_one_encoder_and_serves_segments(client, tools) -> None:
+    r = client.get("/hls/stream.m3u8")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/vnd.apple.mpegurl")
+    assert "#EXTM3U" in r.text
+    seg = next(line for line in r.text.splitlines() if line.endswith(".ts"))
+    s = client.get(f"/hls/{seg}")
+    assert s.status_code == 200
+    assert s.content.startswith(b"segment-")
+    assert client.get("/hls/stream.m3u8").status_code == 200
+    assert len(_pids(tools)) == 1  # polling the playlist reuses the encoder
+    assert client.get("/hls/..%2Fsecret.ts").status_code == 404
+    assert client.get("/hls/nope.ts").status_code == 404
+
+
+def test_hls_encoder_stops_when_nobody_polls(make_client, raw_config, tools, monkeypatch) -> None:
+    monkeypatch.setattr(stream, "HLS_IDLE_S", 0.6)
+    with make_client(raw_config) as c:
+        assert c.get("/hls/stream.m3u8").status_code == 200
+        (pid,) = _pids(tools)
+        assert _wait_dead(pid)
+        # The next poll starts a fresh encoder.
+        assert c.get("/hls/stream.m3u8").status_code == 200
+        assert len(_pids(tools)) == 2
+
+
+def test_missing_ffmpeg_is_a_clean_500(make_client, raw_config, tmp_path) -> None:
+    raw_config["stream"]["ffmpeg"] = str(tmp_path / "no-ffmpeg")
+    with make_client(raw_config) as c:
+        assert c.get("/stream.ogg").status_code == 500
+        assert c.get("/hls/stream.m3u8").status_code == 500
 
 
 # -- render -----------------------------------------------------------------
