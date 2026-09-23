@@ -10,6 +10,7 @@ re-run the generator and commit the diff.
 | python | annotated-types | 0.8.0 | MIT | [link](https://github.com/annotated-types/annotated-types) |
 | python | anyio | 4.15.1 | MIT | [link](https://anyio.readthedocs.io/en/stable/versionhistory.html) |
 | python | certifi | 2026.7.22 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://github.com/certifi/python-certifi) |
+| python | cffi | 2.1.1 | MIT | [link](https://github.com/python-cffi/cffi) |
 | python | click | 8.5.0 | BSD-3-Clause | [link](https://github.com/pallets/click/) |
 | python | fastapi | 0.141.1 | MIT | [link](https://github.com/fastapi/fastapi) |
 | python | h11 | 0.16.0 | MIT License | [link](https://github.com/python-hyper/h11) |
@@ -19,12 +20,14 @@ re-run the generator and commit the diff.
 | python | iniconfig | 2.3.0 | MIT | [link](https://github.com/pytest-dev/iniconfig) |
 | python | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | [link](https://github.com/pypa/packaging) |
 | python | pluggy | 1.6.0 | MIT License | UNKNOWN |
+| python | pycparser | 3.0 | BSD-3-Clause | [link](https://github.com/eliben/pycparser) |
 | python | pydantic | 2.13.5 | MIT | [link](https://github.com/pydantic/pydantic) |
 | python | pydantic_core | 2.46.5 | MIT | [link](https://github.com/pydantic) |
 | python | Pygments | 2.21.0 | BSD-2-Clause | [link](https://pygments.org) |
 | python | pytest | 9.1.1 | MIT | [link](https://docs.pytest.org/en/latest/) |
 | python | reaper-remote | 0.0.0 | Apache-2.0 | UNKNOWN |
 | python | ruff | 0.16.8 | MIT | [link](https://docs.astral.sh/ruff) |
+| python | sounddevice | 0.5.6 | MIT (bundles PortAudio, MIT) | [link](https://github.com/spatialaudio/python-sounddevice) |
 | python | starlette | 1.6.0 | BSD-3-Clause | [link](https://github.com/Kludex/starlette) |
 | python | typing-inspection | 0.4.4 | MIT | [link](https://github.com/pydantic/typing-inspection) |
 | python | typing_extensions | 4.16.0 | PSF-2.0 | [link](https://github.com/python/typing_extensions) |

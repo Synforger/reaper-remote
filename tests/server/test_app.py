@@ -102,13 +102,20 @@ def test_device_tool_failure_is_surfaced(client) -> None:
 # -- stream -----------------------------------------------------------------
 
 
-def test_encoders_capture_the_configured_input(raw_config, tmp_path) -> None:
+def test_encoders_read_the_capture_untouched(raw_config, tmp_path) -> None:
     cfg = parse(raw_config)
-    ogg = ogg_args(cfg)
-    assert ogg[ogg.index("-i") + 1] == ":Capture Device"
+    ogg, hls = ogg_args(cfg, 44100), hls_args(cfg, 44100, tmp_path)
+    for args in (ogg, hls):
+        i = args.index("-i")
+        assert args[i - 6 : i + 2] == ["-f", "f32le", "-ar", "44100", "-ac", "2", "-i", "pipe:0"]
+        # The owner's rule: the sound is never altered. No filters, no gain,
+        # no resampling or channel changes after the input.
+        after = args[i + 2 :]
+        for banned in ("-af", "-filter:a", "-filter_complex", "-ar", "-ac", "-vol"):
+            assert banned not in after, f"{banned} would alter the audio"
+        assert not any("volume" in a or "limit" in a or "loudnorm" in a for a in after)
     assert ogg[ogg.index("-c:a") + 1] == "libopus"
     assert ogg[-1] == "pipe:1"
-    hls = hls_args(cfg, tmp_path)
     assert hls[hls.index("-c:a") + 1] == "aac"
     assert hls[hls.index("-f", hls.index("-c:a")) + 1] == "hls"
     assert hls[-1] == str(tmp_path / "stream.m3u8")
@@ -116,6 +123,47 @@ def test_encoders_capture_the_configured_input(raw_config, tmp_path) -> None:
     # and EXT-X-PROGRAM-DATE-TIME in every playlist (8.4).
     assert int(hls[hls.index("-hls_list_size") + 1]) >= 6
     assert "program_date_time" in hls[hls.index("-hls_flags") + 1]
+
+
+def test_capture_pcm_reaches_the_encoder(client, tools, device) -> None:
+    with client.stream("GET", "/stream.ogg") as r:
+        chunks = r.iter_bytes()
+        next(chunks)
+        deadline = time.time() + 3
+        while time.time() < deadline and tools["pcmfile"].stat().st_size < 4096:
+            next(chunks)
+        assert tools["pcmfile"].read_bytes()[:8] == b"\x01\x02\x03\x04" * 2
+        args = tools["argsfile"].read_text().split()
+        assert args[args.index("-ar") + 1] == "44100"  # the device's own rate
+
+
+def test_ogg_and_hls_share_one_device_stream(client, device) -> None:
+    with client.stream("GET", "/stream.ogg") as r:
+        chunks = r.iter_bytes()
+        next(chunks)
+        assert client.get("/hls/stream.m3u8").status_code == 200
+        assert device.opened == 1 and device.running == 1
+        next(chunks)
+
+
+def test_device_stream_stops_with_the_last_encoder(make_client, raw_config, device, monkeypatch):
+    monkeypatch.setattr(stream, "HLS_IDLE_S", 1.5)
+    with make_client(raw_config) as c:
+        assert c.get("/hls/stream.m3u8").status_code == 200
+        assert device.running == 1
+        deadline = time.time() + 5
+        while device.running and time.time() < deadline:
+            time.sleep(0.05)
+        assert device.running == 0
+
+
+def test_missing_capture_device_is_a_clean_500(make_client, raw_config, device) -> None:
+    device.missing = True
+    with make_client(raw_config) as c:
+        for path in ("/stream.ogg", "/hls/stream.m3u8"):
+            r = c.get(path)
+            assert r.status_code == 500
+            assert "no input device named" in r.json()["detail"]
 
 
 def _alive(pid: int) -> bool:
@@ -192,7 +240,7 @@ def test_hls_playlist_starts_one_encoder_and_serves_segments(client, tools) -> N
 
 
 def test_hls_encoder_stops_when_nobody_polls(make_client, raw_config, tools, monkeypatch) -> None:
-    monkeypatch.setattr(stream, "HLS_IDLE_S", 0.6)
+    monkeypatch.setattr(stream, "HLS_IDLE_S", 1.5)
     with make_client(raw_config) as c:
         assert c.get("/hls/stream.m3u8").status_code == 200
         (pid,) = _pids(tools)
@@ -200,6 +248,17 @@ def test_hls_encoder_stops_when_nobody_polls(make_client, raw_config, tools, mon
         # The next poll starts a fresh encoder.
         assert c.get("/hls/stream.m3u8").status_code == 200
         assert len(_pids(tools)) == 2
+
+
+def test_hls_idle_watchdog_spares_a_request_waiting_for_the_first_playlist(
+    make_client, raw_config, tools, monkeypatch
+) -> None:
+    # The first playlist can take longer than the idle window (first segment).
+    monkeypatch.setattr(stream, "HLS_IDLE_S", 0.2)
+    slow = tools["ffmpeg"].read_text().replace("    i=0\n", "    i=0\n    sleep 1\n", 1)
+    tools["ffmpeg"].write_text(slow)
+    with make_client(raw_config) as c:
+        assert c.get("/hls/stream.m3u8").status_code == 200
 
 
 def test_missing_ffmpeg_is_a_clean_500(make_client, raw_config, tmp_path) -> None:

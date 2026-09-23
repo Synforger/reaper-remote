@@ -10,7 +10,7 @@ Unknown keys are rejected at startup, so a typo fails loudly.
 | `host` | `127.0.0.1` | bind address. Keep loopback and publish with `tailscale serve` |
 | `port` | `8090` | bind port |
 | `reaper_url` | (required) | REAPER's web interface, e.g. `http://127.0.0.1:8080` |
-| `stream.input` | (required) | capture device name as ffmpeg's avfoundation sees it, e.g. `BlackHole 2ch` |
+| `stream.input` | (required) | CoreAudio input device to capture, e.g. `BlackHole 2ch` (as listed in Audio MIDI Setup). It is captured at the device's own sample rate and passed to the encoders unchanged |
 | `stream.bitrate` | `128k` | Opus bitrate |
 | `stream.ffmpeg` | `ffmpeg` | ffmpeg binary (name on `PATH` or full path) |
 | `devices.headphones` | — | output device name for the `headphones` button |

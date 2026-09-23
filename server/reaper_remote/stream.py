@@ -1,5 +1,7 @@
 """Live audio: one shared encoder per format, running only while someone listens.
 
+Both encoders read raw PCM from the shared CoreAudio capture (`capture.py`).
+
 - `OggBroadcast` runs one ffmpeg producing Ogg/Opus and fans its pages out to
   every connected listener. A listener that joins late first receives the
   stream's header pages (OpusHead / OpusTags), then pages from the current
@@ -22,6 +24,7 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from .capture import CHANNELS, SAMPLE_FORMAT, Capture, feed
 from .config import Config
 
 OGG_READ_BYTES = 4096
@@ -37,28 +40,27 @@ HLS_FIRST_PLAYLIST_TIMEOUT_S = 15.0
 HLS_POLL_S = 0.2
 
 
-def capture_args(cfg: Config) -> list[str]:
-    s = cfg.stream
+def pcm_input_args(cfg: Config, rate: int) -> list[str]:
+    """ffmpeg reading the shared capture's raw PCM from stdin, untouched."""
     return [
-        s.ffmpeg,
-        "-hide_banner", "-loglevel", "error", "-nostdin",
-        "-f", "avfoundation", "-i", f":{s.input}",
-        "-ac", "2",
+        cfg.stream.ffmpeg,
+        "-hide_banner", "-loglevel", "error",
+        "-f", SAMPLE_FORMAT, "-ar", str(rate), "-ac", str(CHANNELS), "-i", "pipe:0",
     ]  # fmt: skip
 
 
-def ogg_args(cfg: Config) -> list[str]:
+def ogg_args(cfg: Config, rate: int) -> list[str]:
     return [
-        *capture_args(cfg),
+        *pcm_input_args(cfg, rate),
         "-c:a", "libopus", "-b:a", cfg.stream.bitrate, "-application", "audio",
         "-f", "ogg", "-flush_packets", "1",
         "pipe:1",
     ]  # fmt: skip
 
 
-def hls_args(cfg: Config, out_dir: Path) -> list[str]:
+def hls_args(cfg: Config, rate: int, out_dir: Path) -> list[str]:
     return [
-        *capture_args(cfg),
+        *pcm_input_args(cfg, rate),
         "-c:a", "aac", "-b:a", cfg.stream.bitrate,
         "-f", "hls",
         "-hls_time", str(HLS_SEGMENT_S),
@@ -72,12 +74,47 @@ def hls_args(cfg: Config, out_dir: Path) -> list[str]:
     ]  # fmt: skip
 
 
-async def _kill(proc: asyncio.subprocess.Process | None) -> None:
-    if proc is None:
-        return
-    if proc.returncode is None:
-        proc.kill()
-    await proc.wait()
+class Encoder:
+    """One ffmpeg fed by the shared capture; stopping it releases the capture."""
+
+    def __init__(self, capture: Capture) -> None:
+        self.capture = capture
+        self.proc: asyncio.subprocess.Process | None = None
+        self.queue: asyncio.Queue | None = None
+        self.feeder: asyncio.Task | None = None
+
+    @property
+    def running(self) -> bool:
+        return self.proc is not None and self.proc.returncode is None
+
+    async def start(self, args_for_rate, stdout) -> asyncio.subprocess.Process:
+        self.queue = self.capture.subscribe()
+        try:
+            self.proc = await asyncio.create_subprocess_exec(
+                *args_for_rate(self.capture.rate),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=stdout,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except BaseException:
+            self.capture.unsubscribe(self.queue)
+            self.queue = None
+            raise
+        assert self.proc.stdin is not None
+        self.feeder = asyncio.create_task(feed(self.queue, self.proc.stdin))
+        return self.proc
+
+    async def stop(self) -> None:
+        proc, queue, feeder = self.proc, self.queue, self.feeder
+        self.proc = self.queue = self.feeder = None
+        if feeder is not None:
+            feeder.cancel()
+        if queue is not None:
+            self.capture.unsubscribe(queue)
+        if proc is not None:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.wait()
 
 
 # -- Ogg ------------------------------------------------------------------------
@@ -111,9 +148,9 @@ def granule_position(page: bytes) -> int:
 
 
 class OggBroadcast:
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, capture: Capture) -> None:
         self.cfg = cfg
-        self.proc: asyncio.subprocess.Process | None = None
+        self.encoder = Encoder(capture)
         self.reader: asyncio.Task | None = None
         self.header = b""
         self.header_done = False
@@ -121,9 +158,15 @@ class OggBroadcast:
         self.lock = asyncio.Lock()
 
     async def listen(self) -> AsyncIterator[bytes]:
+        """Yield Ogg pages for one listener; the last one leaving stops the encoder.
+
+        Callers should pull the first page before answering (see app.py): once
+        the generator has started, closing or collecting it always runs the
+        clean-up below, even if the client is gone before streaming begins.
+        """
         queue: asyncio.Queue = asyncio.Queue(maxsize=LISTENER_QUEUE_PAGES)
         async with self.lock:
-            if self.proc is None:
+            if not self.encoder.running:
                 await self._start()
             self.listeners[queue] = False
             if self.header_done:
@@ -137,24 +180,27 @@ class OggBroadcast:
                 if not self.listeners:
                     await self._stop()
 
+    async def close(self) -> None:
+        async with self.lock:
+            for queue in list(self.listeners):
+                self._end(queue)
+            await self._stop()
+
     def _send_header(self, queue: asyncio.Queue) -> None:
         queue.put_nowait(self.header)
         self.listeners[queue] = True
 
     async def _start(self) -> None:
+        await self.encoder.stop()  # a previous encoder that died
         self.header, self.header_done = b"", False
-        self.proc = await asyncio.create_subprocess_exec(
-            *ogg_args(self.cfg),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            stdin=asyncio.subprocess.DEVNULL,
+        proc = await self.encoder.start(
+            lambda rate: ogg_args(self.cfg, rate), asyncio.subprocess.PIPE
         )
-        self.reader = asyncio.create_task(self._read(self.proc))
+        self.reader = asyncio.create_task(self._read(proc))
 
     async def _stop(self) -> None:
-        proc, reader = self.proc, self.reader
-        self.proc = self.reader = None
-        await _kill(proc)
+        reader, self.reader = self.reader, None
+        await self.encoder.stop()
         if reader is not None:
             reader.cancel()
 
@@ -200,12 +246,13 @@ class OggBroadcast:
 
 
 class HlsSession:
-    def __init__(self, cfg: Config, idle_s: float | None = None) -> None:
+    def __init__(self, cfg: Config, capture: Capture, idle_s: float | None = None) -> None:
         self.cfg = cfg
         self.idle_s = HLS_IDLE_S if idle_s is None else idle_s
-        self.proc: asyncio.subprocess.Process | None = None
+        self.encoder = Encoder(capture)
         self.dir: Path | None = None
         self.last_request = 0.0
+        self.waiting = 0  # requests waiting for the first playlist
         self.watchdog: asyncio.Task | None = None
         self.lock = asyncio.Lock()
 
@@ -213,15 +260,21 @@ class HlsSession:
         """Start the encoder if needed and return the playlist once it exists."""
         self.last_request = time.monotonic()
         async with self.lock:
-            if self.proc is None or self.proc.returncode is not None:
+            if not self.encoder.running:
                 await self._start()
             assert self.dir is not None
             path = self.dir / HLS_PLAYLIST
         deadline = time.monotonic() + HLS_FIRST_PLAYLIST_TIMEOUT_S
-        while not path.is_file():
-            if time.monotonic() > deadline or self.proc is None:
-                return None
-            await asyncio.sleep(HLS_POLL_S)
+        self.waiting += 1
+        try:
+            while not path.is_file():
+                if time.monotonic() > deadline or not self.encoder.running:
+                    return None
+                await asyncio.sleep(HLS_POLL_S)
+        finally:
+            self.waiting -= 1
+        # Waiting for the first segment must not count as idle time.
+        self.last_request = time.monotonic()
         return path
 
     def segment(self, name: str) -> Path | None:
@@ -232,12 +285,9 @@ class HlsSession:
 
     async def _start(self) -> None:
         await self._stop()
-        self.dir = Path(tempfile.mkdtemp(prefix="reaper-remote-hls-"))
-        self.proc = await asyncio.create_subprocess_exec(
-            *hls_args(self.cfg, self.dir),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            stdin=asyncio.subprocess.DEVNULL,
+        out_dir = self.dir = Path(tempfile.mkdtemp(prefix="reaper-remote-hls-"))
+        await self.encoder.start(
+            lambda rate: hls_args(self.cfg, rate, out_dir), asyncio.subprocess.DEVNULL
         )
         if self.watchdog is None or self.watchdog.done():
             self.watchdog = asyncio.create_task(self._watch())
@@ -245,15 +295,15 @@ class HlsSession:
     async def _watch(self) -> None:
         while True:
             await asyncio.sleep(min(1.0, self.idle_s / 4))
-            if time.monotonic() - self.last_request > self.idle_s:
+            idle = time.monotonic() - self.last_request > self.idle_s
+            if idle and not self.waiting:
                 async with self.lock:
                     await self._stop()
                 return
 
     async def _stop(self) -> None:
-        proc, out_dir = self.proc, self.dir
-        self.proc = self.dir = None
-        await _kill(proc)
+        out_dir, self.dir = self.dir, None
+        await self.encoder.stop()
         if out_dir is not None:
             shutil.rmtree(out_dir, ignore_errors=True)
 

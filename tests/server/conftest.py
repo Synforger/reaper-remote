@@ -53,6 +53,51 @@ class FakeReaper:
         return httpx.Response(self.status, text=self.reply)
 
 
+class FakeDevice:
+    """Stands in for the CoreAudio input: a thread delivering PCM blocks."""
+
+    RATE = 44100
+    BLOCK = b"\x01\x02\x03\x04" * 256
+
+    def __init__(self) -> None:
+        self.opened = 0
+        self.running = 0
+        self.missing = False
+
+    def open(self, device: str, on_block):
+        if self.missing:
+            raise LookupError(f"no input device named {device!r} with 2 channels")
+        self.opened += 1
+        dev = self
+
+        class Stream:
+            def __init__(self) -> None:
+                self.stop_event = threading.Event()
+
+            def start(self) -> None:
+                dev.running += 1
+
+                def run() -> None:
+                    while not self.stop_event.wait(0.02):
+                        on_block(FakeDevice.BLOCK)
+
+                threading.Thread(target=run, daemon=True).start()
+
+            def stop(self) -> None:
+                self.stop_event.set()
+                dev.running -= 1
+
+            def close(self) -> None:
+                pass
+
+        return Stream(), FakeDevice.RATE
+
+
+@pytest.fixture
+def device() -> FakeDevice:
+    return FakeDevice()
+
+
 @pytest.fixture
 def reaper() -> FakeReaper:
     return FakeReaper()
@@ -79,6 +124,7 @@ fi
 exit 2
 """,
     )
+    pcmfile = tmp_path / "ffmpeg.stdin"
     pidfile = tmp_path / "ffmpeg.pid"
     argsfile = tmp_path / "ffmpeg.args"
     header = tmp_path / "ogg-header.bin"
@@ -92,6 +138,10 @@ exit 2
         f"""
 echo $$ >> "{pidfile}"
 printf '%s\\n' "$@" > "{argsfile}"
+# POSIX gives a background job /dev/null as stdin before its own redirections
+# apply, so hand the real stdin over on another descriptor.
+exec 3<&0
+cat <&3 >> "{pcmfile}" &
 for last; do :; done
 case " $* " in
   *" -f hls "*)
@@ -113,6 +163,7 @@ while true; do cat "{audio}"; sleep 0.05; done
         "present": present,
         "ffmpeg": ffmpeg,
         "pidfile": pidfile,
+        "pcmfile": pcmfile,
         "argsfile": argsfile,
         "render_dir": tmp_path / "renders",
     }
@@ -134,13 +185,15 @@ def raw_config(tools: dict[str, Path]) -> dict:
 
 
 @contextmanager
-def serve(raw: dict, reaper: FakeReaper) -> Iterator[httpx.Client]:
+def serve(raw: dict, reaper: FakeReaper, device: FakeDevice) -> Iterator[httpx.Client]:
     """Run the app under a real uvicorn server on a free loopback port.
 
     A real server (not TestClient) is used throughout: only it delivers the
     listener's disconnect to the app, which the stream endpoint depends on.
     """
-    app = create_app(parse(raw), reaper_transport=httpx.MockTransport(reaper.handler))
+    app = create_app(
+        parse(raw), reaper_transport=httpx.MockTransport(reaper.handler), open_stream=device.open
+    )
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -160,9 +213,9 @@ def serve(raw: dict, reaper: FakeReaper) -> Iterator[httpx.Client]:
 
 
 @pytest.fixture
-def make_client(reaper: FakeReaper):
+def make_client(reaper: FakeReaper, device: FakeDevice):
     def make(raw: dict):
-        return serve(raw, reaper)
+        return serve(raw, reaper, device)
 
     return make
 
