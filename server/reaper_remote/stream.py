@@ -30,7 +30,8 @@ LISTENER_QUEUE_PAGES = 256
 
 HLS_PLAYLIST = "stream.m3u8"
 HLS_SEGMENT_S = 2
-HLS_LIST_SIZE = 5
+# Apple's HLS authoring spec 8.11: a live playlist MUST list at least six segments.
+HLS_LIST_SIZE = 10
 HLS_IDLE_S = 20.0
 HLS_FIRST_PLAYLIST_TIMEOUT_S = 15.0
 HLS_POLL_S = 0.2
@@ -62,7 +63,10 @@ def hls_args(cfg: Config, out_dir: Path) -> list[str]:
         "-f", "hls",
         "-hls_time", str(HLS_SEGMENT_S),
         "-hls_list_size", str(HLS_LIST_SIZE),
-        "-hls_flags", "delete_segments+omit_endlist",
+        # program_date_time: spec 8.4 (MUST in every live playlist);
+        # temp_file: a segment becomes visible only once it is complete.
+        "-hls_flags",
+        "delete_segments+omit_endlist+program_date_time+temp_file",
         "-hls_segment_filename", str(out_dir / "seg%05d.ts"),
         str(out_dir / HLS_PLAYLIST),
     ]  # fmt: skip
