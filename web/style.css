@@ -23,7 +23,7 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Sized to fit a host panel of about 420 px with five tracks, without scrolling. */
+/* Sized to fit a host panel of about 340 px (40dvh on a phone) with master + five tracks. */
 body {
   padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
   display: flex;
@@ -63,16 +63,12 @@ button:disabled { opacity: 0.5; }
 
 .position.playing { color: var(--on); }
 .muted { color: var(--muted); font-size: 12px; }
-.status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
-.render {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+button.icon { min-width: 40px; padding: 0; font-size: 17px; }
+
+#btn-listen[data-state="connecting"],
+#btn-listen[data-state="buffering"] { border-color: var(--warn); color: var(--warn); }
+#btn-listen[data-state="live"] { border-color: var(--on); background: #16352a; }
 
 .segmented {
   display: flex;
@@ -85,6 +81,8 @@ button:disabled { opacity: 0.5; }
 .segmented button {
   flex: 1;
   height: 30px;
+  min-width: 0;
+  padding: 0 4px;
   border: 0;
   border-radius: 0;
   font-size: 13px;
@@ -104,7 +102,7 @@ button:disabled { opacity: 0.5; }
   grid-template-columns: minmax(80px, 1.3fr) 32px 32px 2fr 44px;
   align-items: center;
   gap: 6px;
-  height: 34px;
+  height: 32px;
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -123,7 +121,7 @@ button:disabled { opacity: 0.5; }
 
 .track button {
   min-width: 0;
-  height: 26px;
+  height: 24px;
   padding: 0;
   font-size: 12px;
 }

@@ -16,19 +16,11 @@
     <span id="position" class="position">--</span>
   </section>
 
-  <section class="row listen">
-    <button id="btn-listen" class="toggle wide">🎧 Listen</button>
-    <span id="listen-status" class="muted status">off</span>
+  <section class="row controls">
+    <button id="btn-listen" class="toggle icon" data-state="off" title="Listen: off" aria-label="Listen">🎧</button>
     <audio id="audio" preload="none"></audio>
-    <span class="render" id="render" hidden>
-      <span id="render-status" class="muted status"></span>
-      <button id="btn-render" class="wide">⤓ Render</button>
-    </span>
-  </section>
-
-  <section class="row output" id="output" hidden>
-    <span class="label">Mac output</span>
-    <div class="segmented" id="devices"></div>
+    <div class="segmented" id="devices" hidden title="Mac output"></div>
+    <button id="btn-render" class="icon" hidden title="Render the time selection" aria-label="Render">⤓</button>
   </section>
 
   <section class="tracks" id="tracks"></section>
