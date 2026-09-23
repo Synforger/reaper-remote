@@ -73,9 +73,17 @@ button:disabled { opacity: 0.5; }
 
 button.icon { min-width: 40px; padding: 0; font-size: 17px; }
 
-#btn-listen[data-state="connecting"],
-#btn-listen[data-state="buffering"] { border-color: var(--warn); color: var(--warn); }
-#btn-listen[data-state="live"] { border-color: var(--on); background: #16352a; }
+/* Whether this phone is playing the Mac's audio: grey off, amber connecting, green live. */
+.dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--line);
+}
+.dot[data-state="connecting"],
+.dot[data-state="buffering"] { background: var(--warn); }
+.dot[data-state="live"] { background: var(--on); }
 
 .segmented {
   display: flex;

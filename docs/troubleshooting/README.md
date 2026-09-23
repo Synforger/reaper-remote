@@ -7,7 +7,7 @@ REAPER is not running, or its web interface is off or on another port.
 `TRANSPORT` line; if it does not, enable the interface (Setup step 2) or fix
 `reaper_url`.
 
-## Listen connects but stays silent
+## The dot is green but nothing is heard
 
 - The Mac output is `headphones`, so nothing reaches BlackHole. Switch to
   `multi` or `blackhole`.
@@ -25,14 +25,20 @@ ffmpeg -i http://127.0.0.1:8090/llhls/index.m3u8 -t 5 -af volumedetect -f null -
 
 `max_volume` around `-91 dB` means silence reached the encoder.
 
-## Listen stays yellow, or plays 1–2 s late instead of instantly
+## Opening the page with Multi or BlackHole selected stays silent
+
+Phones only start audio from a tap on the page. Tap Multi or BlackHole (the
+one already selected works too); the dot next to them turns amber, then
+green.
+
+## The dot stays amber, or audio plays 1–2 s late instead of instantly
 
 WebRTC could not connect and the page fell back to Low-Latency HLS. The audio
 travels on UDP port 8189 of the Mac: check that mediamtx is running and that
 the port is reachable from the phone (on a tailnet it normally is). The
 mediamtx log shows each session and the candidate pair it used.
 
-## Listen stops when the phone locks or the browser goes to the background
+## Audio stops when the phone locks or the browser goes to the background
 
 Mobile browsers may suspend media in background tabs. Keep the page in the
 foreground, or add it to the home screen and check whether playback continues
