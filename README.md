@@ -1,121 +1,78 @@
-# personal-template
+# reaper-remote
 
-> 🇯🇵 日本語版: [README.ja.md](README.ja.md)
+> Control REAPER and listen to its output from a phone browser, over your own tailnet.
 
-A **language-neutral quality template** for public personal
-repositories. `task init` promotes `_core/` (the quality machinery
-shared by every derived project) to the repo root and your project
-starts with the full toolchain below already wired.
+reaper-remote is a small server that runs on the Mac next to REAPER. Open it
+in a phone browser and you get the transport (play / pause / stop / repeat),
+a fader with mute and solo for every track, a live stream of what the Mac is
+playing, a switch for the Mac's system output, and a one-tap render of the
+time selection.
 
-Living example of a derived repository:
-[claude-code-statusline](https://github.com/Synforger/claude-code-statusline).
+It is built to sit inside another page as an iframe (for example a chat app
+that mounts extensions at `/ext/<id>/`): every URL in the UI is relative, so
+the same process works at `/` and under any path prefix.
 
-## What you get
+## How it works
 
-| category | contents |
-|---|---|
-| **Local-first CI** | `task lint` / `task test:unit` / `task docs:check` run every quality gate on your machine — zero GitHub Actions billing |
-| **Anonymity guard** | [guard-dispatcher](https://github.com/Synforger/guard-dispatcher) (machine-wide hooks gate) machine-checks commits / pushes / PRs for identity leaks; this template ships only the repo-specific hook (branch guard + gitleaks) |
-| **Secret guard** | gitleaks in the pre-commit hook catches API keys, passwords, private keys before they leave the working tree |
-| **Docs freshness guard** | verifies that paths, `task` names, tree diagrams, and conflict markers inside your markdown match reality (4 axes) |
-| **Toolchain single-source** | `.tooling/versions.yaml` holds the host floor; `task doctor` diagnoses MISSING / TOO OLD / OK, `task lint:versions` catches downstream config drift |
-| **Aggregate security audit** | `task audit` runs anon-scan + gitleaks full history + pip-audit + npm audit + cargo audit in one pass, skipping absent tools |
-| **Stack-aware clean** | `task clean` removes build artefacts + caches for whichever stacks are present |
-| **Release driver** | `task release:cut LEVEL=patch\|minor\|major` bumps, commits, tags, and pushes in one command; `DRY_RUN=1` previews |
-| **Public-OSS essentials** | `SECURITY.md` / `ROADMAP.md` / `THIRD_PARTY_NOTICES.md` templates included; the latter regenerates via `task gen-notices` |
-| **Branch protection** | one command applies main-branch protection via the gh CLI |
-| **Interactive personalization** | replaces package name / GitHub URL / version placeholders interactively |
+```
+phone browser ──https──▶ tailscale serve ──▶ reaper-remote (127.0.0.1:8090)
+                                               ├─ /reaper/_/…  ─▶ REAPER web interface (127.0.0.1:8080)
+                                               ├─ /stream.ogg  ◀─ ffmpeg ◀─ BlackHole 2ch ◀─ Mac output
+                                               ├─ /device      ─▶ SwitchAudioSource (Mac system output)
+                                               └─ /render      ─▶ REAPER action (reaper/reaper-remote-render.lua)
+```
 
-## Usage (4 steps)
+- The server binds to loopback only. Reaching it from the phone is left to
+  [Tailscale Serve](https://tailscale.com/kb/1312/serve), which also gives
+  you HTTPS and limits access to your tailnet.
+- Audio is captured from a loopback device ([BlackHole](https://github.com/ExistentialAudio/BlackHole))
+  and encoded to Opus only while someone is listening. Expect 1–3 seconds of delay.
+- REAPER follows the Mac's system output, so switching the output to a
+  Multi-Output Device (headphones + BlackHole) lets you hear the mix locally
+  and remotely at the same time.
+
+## Requirements
+
+- macOS with REAPER, its web interface enabled (Preferences → Control/OSC/web → Add → Web browser interface)
+- [uv](https://docs.astral.sh/uv/), [ffmpeg](https://ffmpeg.org/) with libopus,
+  [SwitchAudioSource](https://github.com/deweller/switchaudio-osx),
+  [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)
+- [Tailscale](https://tailscale.com/) on the Mac and the phone (for remote access)
 
 ```bash
-# 1. Create a new repo from this template, then clone it
-gh repo create <owner>/<new-project> --template Synforger/personal-template --clone
-
-# 2. Promote the template structure to the repo root
-cd <new-project>
-task init
-
-# 3. Set package name / GitHub URL / version interactively
-pip install -r setup-requirements.txt
-python personalize.py
-
-# 4. Install dev dependencies + arm the git hooks
-task setup
+brew install uv ffmpeg switchaudio-osx blackhole-2ch go-task
 ```
 
-See
-[`_core/docs/internals/template-usage.md`](_core/docs/internals/template-usage.md)
-for the post-init structure and workflow (the file is removed by
-`task init`).
+## Quick start
 
-## No language scaffolding
-
-This template ships quality machinery only. The stack verbs —
-`task setup / lint / test:unit / test:integration / build / run` —
-are stubs you fill in with your project's real commands after
-deriving (a `Taskfile.local.yml` include is honoured if you prefer
-keeping them separate). The contract is that every derived repo
-answers to the same verbs; the implementation is yours.
-
-## Why local-first (and where CI fits)
-
-Every gate runs offline on the maintainer's machine — no runner
-minutes, works in forks, and survives any CI pricing change. On public
-repositories a thin `ci.yml` re-runs the exact same `task ci` on pull
-requests as a status-check mirror (free on public repos, and it
-refuses to run on private ones). The checks themselves are never
-implemented in workflow files.
-
-## Language policy
-
-- `README.md` is English; `README.ja.md` is Japanese. Both link to
-  each other at the top.
-- User-facing output (`--help`, error messages, CI output) is
-  English.
-- Code comments and internal design notes may be Japanese.
-
-## Structure (template state)
-
-```
-personal-template/
-├── README.md / README.ja.md     # this file + Japanese counterpart
-├── Taskfile.yml                 # init / install:core (overwritten by _core/Taskfile.yml on init)
-├── _core/                       # language-neutral machinery, promoted to root on init
-│   ├── Taskfile.yml             # core task definitions (becomes the root Taskfile.yml)
-│   ├── .githooks/pre-commit     # repo-local hook (branch guard + gitleaks; the anon
-│   │                            #   baseline runs in guard-dispatcher, AND-composed)
-│   ├── .github/                 # ISSUE_TEMPLATE/ + workflows/version-bump.yml
-│   ├── .tooling/local-ci/       # docs-check / doctor / audit / clean / lint-versions /
-│   │                            #   version-bump / release-cut / setup-lib
-│   ├── docs/                    # two-tier user/contributor docs placeholder
-│   ├── scripts/                 # init.py / install-core.sh / post-init-github-settings.sh /
-│   │                            #   setup-branch-protection.sh / gen-third-party-notices.py
-│   ├── personalize.py
-│   └── setup-requirements.txt
+```bash
+git clone https://github.com/Synforger/reaper-remote.git
+cd reaper-remote
+task setup                              # uv sync
+cp config.example.json config.json      # then fill in your device names
+task run                                # serves http://127.0.0.1:8090/
 ```
 
-## Design principles
+Publish it on your tailnet (path is up to you):
 
-- **Structural symmetry** — every derived repo answers to the same
-  task verbs and file layout
-- **Minimal adoption cost** — adopting a stack means filling in the
-  Taskfile stubs plus one line in versions.yaml
-- **Language-neutral core** — docs-check, hooks, GitHub workflow,
-  branch protection are all shared via `_core/`
-
-## Tests
-
-The template's own machinery is covered by a bats suite:
-
-```sh
-brew install bats-core   # once
-task test:template       # or: bats tests/
+```bash
+tailscale serve --bg --set-path=/ext/reaper http://127.0.0.1:8090
 ```
 
-Fixtures build throwaway repos under the test tmpdir — nothing in the
-checkout is mutated.
+Then open `https://<your-mac>.<your-tailnet>.ts.net/ext/reaper/` on the phone.
+
+Step-by-step setup (audio routing, the render script, running at login) is in
+[`docs/setup/`](docs/setup/README.md).
+
+## Documentation
+
+- Setup: [`docs/setup/`](docs/setup/README.md)
+- Configuration and HTTP API: [`docs/reference/`](docs/reference/README.md)
+- Troubleshooting: [`docs/troubleshooting/`](docs/troubleshooting/README.md)
+- Contributing: [`docs/internals/`](docs/internals/README.md)
 
 ## License
 
-Apache-2.0 ([`LICENSE`](LICENSE))
+Apache-2.0 ([`LICENSE`](LICENSE)). Dependencies are listed in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md); vulnerability reports go
+through [`SECURITY.md`](SECURITY.md).

@@ -1,16 +1,11 @@
 # Security Policy
 
-> Replace `{{repo_full_name}}` / `{{maintainer_handle}}` / `{{threat_model}}`
-> placeholders during `python personalize.py`. This file is a template;
-> derived repos should customise the threat model + supported versions
-> sections for their own deployment surface.
-
 ## Reporting a vulnerability
 
 Use **GitHub Security Advisories private vulnerability reporting** to
 disclose security issues responsibly:
 
-1. Open https://github.com/{{repo_full_name}}/security/advisories/new
+1. Open https://github.com/Synforger/reaper-remote/security/advisories/new
 2. Fill in the affected version + reproduction + impact estimate
 3. Maintainer will acknowledge within 7 days
 
@@ -18,8 +13,8 @@ Do not file public Issues or PRs for security-relevant findings. Public
 discussion only after a fix has shipped and end users have had time to
 update.
 
-If GitHub access is unavailable, reach `{{maintainer_handle}}` via the
-contact channel listed in the repo's README.
+If GitHub access is unavailable, open a GitHub issue asking for a private
+contact channel, without details of the finding.
 
 ## Supported versions
 
@@ -35,22 +30,27 @@ your environment requires reproducibility.
 
 ## Threat model
 
-`{{threat_model}}` — fill this in with the deployment context. Example
-shapes:
+reaper-remote runs on a single user's Mac and is reached from that user's
+own devices over their tailnet.
 
-- "Local CLI installed by individual developers" — threats = malicious
-  input files, dependency confusion, sandbox escape
-- "Public web service" — threats = unauthenticated request handling,
-  rate limit bypass, secret leakage in logs
-- "Library consumed by third-party apps" — threats = privilege
-  escalation via embedded usage, supply chain via published artefact
+- The server has **no authentication of its own**. It binds to loopback
+  (`127.0.0.1`) by default, and access is granted by whoever can reach it
+  through `tailscale serve` — i.e. the members of the tailnet. Anyone who
+  can open the page can control REAPER, hear the Mac's output, switch the
+  Mac's output device and trigger renders.
+- Binding to a non-loopback `host` exposes all of that to the network
+  without authentication. Do not do it on a network you do not control.
+- REAPER's own web interface (default port 8080) also has no authentication
+  unless you set one, and listens on all interfaces. reaper-remote only needs
+  it on loopback.
+- Commands sent to `/reaper/_/` are passed to REAPER unchanged; the server
+  does not filter them. Rendered files are served only from `render.dir`.
 
 ## In scope
 
 - Authentication / authorization flaws (= when applicable)
 - Sensitive data leakage (= secrets in logs / errors / responses)
-- Path traversal / SSRF / SQLi / XSS / RCE in code paths the
-  template's own scripts execute
+- Path traversal / SSRF / XSS / RCE in the server or the UI
 - Dependency vulnerabilities surfaced by `task audit`
 
 ## Out of scope
@@ -70,7 +70,7 @@ The maintainer runs `task audit` (= `pip-audit` + `npm audit` +
 
 | date | findings | resolution |
 |---|---|---|
-| YYYY-MM-DD | (initial) | template scaffold |
+| 2026-09-23 | (initial) | repository created |
 
 ## Upstream redirect
 

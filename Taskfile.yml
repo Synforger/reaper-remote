@@ -1,12 +1,19 @@
 # =============================================================================
-# personal-template / root Taskfile (= template state)
+# personal-template / core Taskfile
 # =============================================================================
-# At template state only `task init` is exposed. After init the real Taskfile
-# from `_core/Taskfile.yml` lands here and the full `task --list` becomes
-# available (= setup / lint / test / build / docs:check etc.).
+# Language-neutral quality machinery: docs freshness, toolchain floor,
+# aggregate audit, release driver, GitHub settings. Language-specific tasks
+# (setup / lint / test / build / run) are intentionally thin stubs — fill
+# them in with your stack's commands after deriving. A `Taskfile.local.yml`
+# include is honoured if you prefer keeping your stack's tasks separate.
 # =============================================================================
 
 version: '3'
+
+includes:
+  local:
+    taskfile: ./Taskfile.local.yml
+    optional: true
 
 tasks:
   default:
@@ -14,26 +21,137 @@ tasks:
     cmds:
       - task --list
 
-  init:
-    desc: Initialize this template for a new project (= promote _core/ to root)
+  # ---------------------------------------------------------------------------
+  # Stack verbs — every derived repo answers to the same names; these are
+  # reaper-remote's commands (Python server via uv, plain-JS UI via node).
+  # Keeping the task names stable means every derived repo answers to the
+  # same verbs regardless of language.
+  # ---------------------------------------------------------------------------
+  setup:
+    desc: Install the server and its dev tools into .venv (uv)
     cmds:
-      - python3 _core/scripts/init.py
+      - uv sync
 
-  install:core:
-    desc: Install _core machinery into another existing repo (= TARGET=/path, optional DRY_RUN=1)
+  update:
+    desc: Upgrade locked dependencies
+    cmds:
+      - uv lock --upgrade
+      - uv sync
+
+  lint:
+    desc: Lint the server (ruff) and syntax-check the UI (node)
+    cmds:
+      - uv run ruff check server tests/server
+      - uv run ruff format --check server tests/server
+      - node --check web/app.js
+      - node --check web/lib.js
+
+  test:unit:
+    desc: Run the server (pytest) and UI helper (node --test) unit tests
+    cmds:
+      - uv run pytest -q
+      - node --test tests/web/*.test.mjs
+
+  test:integration:
+    desc: No integration suite; the server is exercised end-to-end in test:unit
+    cmds:
+      - echo "no integration tests"
+
+  build:
+    desc: Build the wheel
+    cmds:
+      - uv build
+
+  run:
+    desc: Start the server with ./config.json (or $REAPER_REMOTE_CONFIG)
+    cmds:
+      - uv run reaper-remote
+
+  # ---------------------------------------------------------------------------
+  # Language-neutral quality gates (no delegation).
+  # ---------------------------------------------------------------------------
+  ci:
+    desc: Full quality-gate suite (lint + tests + docs freshness + version drift) — same entry point locally and in CI
+    cmds:
+      - task: lint
+      - task: test:unit
+      - task: docs:check
+      - task: lint:versions
+
+  publish:check:
+    desc: Pre-publication gate for flipping a repo private -> public (full-history audits + OSS surface checks)
+    cmds:
+      - bash .tooling/local-ci/publish-check.sh
+
+  docs:check:
+    desc: Verify docs freshness (paths / task names / tree diagrams vs reality)
+    cmds:
+      - bash .tooling/local-ci/docs-check.sh
+
+  doctor:
+    desc: Full diagnostic — toolchain floor + hooks/machine armament in one pass
+    cmds:
+      - bash .tooling/local-ci/doctor.sh
+      - if [ -f "$HOME/.git-hooks/doctor.sh" ]; then bash "$HOME/.git-hooks/doctor.sh"; else echo "guard-dispatcher not armed on this machine (machine-wide hooks missing)"; fi
+
+  pr:create:
+    desc: Create a GitHub PR with the title/body anon-scanned first (TITLE= BODY_FILE= [BASE=main], needs guard-dispatcher)
+    cmds:
+      - bash "$HOME/.git-hooks/scripts/pr-create.sh" --title "{{.TITLE}}" --body-file "{{.BODY_FILE}}" --base "{{.BASE | default "main"}}"
+
+  lint:versions:
+    desc: Detect downstream toolchain drift vs .tooling/versions.yaml truth
+    cmds:
+      - bash .tooling/local-ci/lint-versions.sh
+
+  gen-notices:
+    desc: Regenerate THIRD_PARTY_NOTICES.md from the installed dep tree (python + node)
+    cmds:
+      - python3 scripts/gen-third-party-notices.py
+
+  audit:
+    desc: Aggregate security audit (anon-scan + gitleaks full history + pip-audit + npm audit)
+    cmds:
+      - bash .tooling/local-ci/audit.sh
+
+  audit:deep:
+    desc: Deep anon audit across 11 sources (needs guard-dispatcher armed on this machine)
+    cmds:
+      - bash "$HOME/.git-hooks/scanners/anon-audit-deep.sh"
+
+  clean:
+    desc: Clean build artefacts + caches (auto-detects present stacks; LAYER=<stack>|docs|all narrows)
     vars:
-      TARGET: '{{.TARGET}}'
+      LAYER: '{{.LAYER | default "all"}}'
+    cmds:
+      - bash .tooling/local-ci/clean.sh {{.LAYER}}
+
+  version:bump:
+    desc: Bump version in bump-targets.yaml + listed files (LEVEL=patch|minor|major, DRY_RUN=1 for plan-only)
+    vars:
+      LEVEL: '{{.LEVEL | default "patch"}}'
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
     cmds:
-      - TARGET={{.TARGET}} DRY_RUN={{.DRY_RUN}} bash _core/scripts/install-core.sh
+      - LEVEL={{.LEVEL}} DRY_RUN={{.DRY_RUN}} bash .tooling/local-ci/version-bump.sh
 
-
-  test:template:
-    desc: Run the template's own bats suite (brew install bats-core)
+  release:cut:
+    desc: Bump version + commit + tag + push (LEVEL=patch|minor|major, SKIP_PUSH=1 to keep local, DRY_RUN=1 for plan-only)
+    vars:
+      LEVEL: '{{.LEVEL | default "patch"}}'
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+      SKIP_PUSH: '{{.SKIP_PUSH | default "0"}}'
     cmds:
-      - bats tests/
+      - LEVEL={{.LEVEL}} DRY_RUN={{.DRY_RUN}} SKIP_PUSH={{.SKIP_PUSH}} bash .tooling/local-ci/release-cut.sh
 
-  bootstrap:machine:
-    desc: Arm this machine (delegates to the guard-dispatcher checkout)
+  setup:branch-protection:
+    desc: Setup branch protection rules for the main branch
     cmds:
-      - bash "$HOME/.git-hooks/scripts/bootstrap-machine.sh"
+      - bash scripts/setup-branch-protection.sh
+
+  init:github:
+    desc: Apply post-template GitHub settings (= secret scanning, PVR, merge config, branch protection)
+    vars:
+      OWNER: '{{.OWNER | default ""}}'
+      REPO: '{{.REPO | default ""}}'
+    cmds:
+      - OWNER={{.OWNER}} REPO={{.REPO}} bash scripts/post-init-github-settings.sh

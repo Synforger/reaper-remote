@@ -1,0 +1,19 @@
+{
+  "host": "127.0.0.1",
+  "port": 8090,
+  "reaper_url": "http://127.0.0.1:8080",
+  "stream": {
+    "input": "BlackHole 2ch",
+    "bitrate": "128k"
+  },
+  "devices": {
+    "headphones": "<your headphone output name>",
+    "multi": "<your Multi-Output Device name>",
+    "blackhole": "BlackHole 2ch"
+  },
+  "render": {
+    "action": "<command ID of reaper/reaper-remote-render.lua, starts with _RS>",
+    "dir": "~/Music/reaper-remote-renders",
+    "timeout_s": 600
+  }
+}

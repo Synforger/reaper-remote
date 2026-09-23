@@ -1,0 +1,334 @@
+// reaper-remote UI. Every URL is relative so the page works wherever it is mounted
+// (for example at /ext/reaper/ behind `tailscale serve --set-path`).
+
+import {
+  DB_MAX,
+  DB_MIN,
+  PLAYSTATE,
+  dbToVolume,
+  formatDb,
+  parseReply,
+  peakToPercent,
+  volumeToSlider,
+} from "./lib.js";
+
+// REAPER action IDs (main section).
+const ACTION = { PLAY: 1007, PAUSE: 1008, STOP: 1016, GO_TO_START: 40042 };
+
+const POLL_MS = 500;
+const FADER_SEND_MS = 60;
+const DEVICE_LABELS = { headphones: "Headphones", multi: "Multi", blackhole: "BlackHole" };
+
+const $ = (id) => document.getElementById(id);
+
+// -- errors -------------------------------------------------------------------
+
+function showError(message) {
+  const el = $("error");
+  el.textContent = message;
+  el.hidden = !message;
+}
+
+async function request(path, init) {
+  const res = await fetch(path, init);
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      // Non-JSON error body: keep the status code.
+    }
+    throw new Error(detail);
+  }
+  return res;
+}
+
+async function reaper(commands) {
+  const res = await request(`reaper/_/${commands}`);
+  return res.text();
+}
+
+// -- transport ----------------------------------------------------------------
+
+let playstate = PLAYSTATE.STOPPED;
+let repeat = false;
+
+function renderTransport(t) {
+  playstate = t.playstate;
+  repeat = t.repeat;
+  const playing = t.playstate === PLAYSTATE.PLAYING || t.playstate === PLAYSTATE.RECORDING;
+  $("btn-play").textContent = playing ? "⏸" : "▶";
+  $("btn-repeat").classList.toggle("on", t.repeat);
+  const pos = $("position");
+  // With a beats-based timeline both strings are identical; show it once.
+  pos.textContent = t.position === t.beats ? t.position : `${t.position}  ${t.beats}`;
+  pos.classList.toggle("playing", playing);
+}
+
+$("btn-play").addEventListener("click", () => {
+  const playing = playstate === PLAYSTATE.PLAYING || playstate === PLAYSTATE.RECORDING;
+  send(String(playing ? ACTION.PAUSE : ACTION.PLAY));
+});
+$("btn-stop").addEventListener("click", () => send(String(ACTION.STOP)));
+$("btn-start").addEventListener("click", () => send(String(ACTION.GO_TO_START)));
+$("btn-repeat").addEventListener("click", () => send(`SET/REPEAT/${repeat ? 0 : 1}`));
+
+async function send(commands) {
+  try {
+    await reaper(commands);
+    await poll();
+  } catch (e) {
+    showError(`REAPER: ${e.message}`);
+  }
+}
+
+// -- tracks -------------------------------------------------------------------
+
+const rows = new Map(); // track index -> { root, slider, db, mute, solo, meter }
+const dragging = new Set(); // track indices whose fader the user is holding
+
+function trackRow(track) {
+  const root = document.createElement("div");
+  root.className = `track${track.index === 0 ? " master" : ""}`;
+
+  const name = document.createElement("span");
+  name.className = "name";
+
+  const mute = document.createElement("button");
+  mute.className = "mute";
+  mute.textContent = "M";
+  mute.addEventListener("click", () => send(`SET/TRACK/${track.index}/MUTE/-1`));
+
+  const solo = document.createElement("button");
+  solo.className = "solo";
+  solo.textContent = "S";
+  solo.addEventListener("click", () => send(`SET/TRACK/${track.index}/SOLO/-1`));
+  if (track.index === 0) solo.disabled = true;
+
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.min = String(DB_MIN);
+  slider.max = String(DB_MAX);
+  slider.step = "0.5";
+  slider.setAttribute("aria-label", "Volume (dB)");
+
+  const db = document.createElement("span");
+  db.className = "db";
+
+  const meter = document.createElement("div");
+  meter.className = "meter";
+
+  let lastSent = 0;
+  let pending = null;
+  const push = () => {
+    pending = null;
+    lastSent = Date.now();
+    const volume = dbToVolume(Number(slider.value));
+    db.textContent = formatDb(volume);
+    reaper(`SET/TRACK/${track.index}/VOL/${volume.toFixed(6)}`).catch((e) =>
+      showError(`REAPER: ${e.message}`),
+    );
+  };
+  slider.addEventListener("pointerdown", () => dragging.add(track.index));
+  const release = () => {
+    dragging.delete(track.index);
+    if (pending) {
+      clearTimeout(pending);
+      push();
+    }
+  };
+  slider.addEventListener("pointerup", release);
+  slider.addEventListener("pointercancel", release);
+  slider.addEventListener("change", release);
+  slider.addEventListener("input", () => {
+    db.textContent = formatDb(dbToVolume(Number(slider.value)));
+    const wait = FADER_SEND_MS - (Date.now() - lastSent);
+    if (wait <= 0) push();
+    else if (!pending) pending = setTimeout(push, wait);
+  });
+
+  root.append(name, mute, solo, slider, db, meter);
+  return { root, name, slider, db, mute, solo, meter };
+}
+
+function renderTracks(tracks) {
+  const box = $("tracks");
+  const seen = new Set();
+  for (const t of tracks) {
+    seen.add(t.index);
+    let row = rows.get(t.index);
+    if (!row) {
+      row = trackRow(t);
+      rows.set(t.index, row);
+    }
+    // Keep DOM order equal to REAPER's track order.
+    if (box.children[tracks.indexOf(t)] !== row.root) {
+      box.insertBefore(row.root, box.children[tracks.indexOf(t)] ?? null);
+    }
+    row.name.textContent = t.name;
+    row.name.title = t.name;
+    row.mute.classList.toggle("on", t.muted);
+    row.solo.classList.toggle("on", t.soloed);
+    if (!dragging.has(t.index)) {
+      row.slider.value = String(volumeToSlider(t.volume));
+      row.db.textContent = formatDb(t.volume);
+    }
+    const pct = peakToPercent(t.peakDb);
+    row.meter.style.width = `${pct}%`;
+    row.meter.classList.toggle("hot", t.peakDb > 0);
+  }
+  for (const [index, row] of rows) {
+    if (!seen.has(index)) {
+      row.root.remove();
+      rows.delete(index);
+    }
+  }
+}
+
+// -- polling ------------------------------------------------------------------
+
+let polling = null;
+let pollingActive = false;
+
+async function poll() {
+  const reply = parseReply(await reaper("TRANSPORT;TRACK"));
+  if (reply.transport) renderTransport(reply.transport);
+  renderTracks(reply.tracks);
+  showError("");
+}
+
+function startPolling() {
+  if (pollingActive) return;
+  pollingActive = true;
+  const tick = async () => {
+    try {
+      await poll();
+    } catch (e) {
+      showError(`REAPER: ${e.message}`);
+    }
+    // A tick that was in flight when polling stopped must not re-arm the timer.
+    if (pollingActive) polling = setTimeout(tick, POLL_MS);
+  };
+  tick();
+}
+
+function stopPolling() {
+  pollingActive = false;
+  clearTimeout(polling);
+  polling = null;
+}
+
+// Poll only while the page is on screen; audio keeps playing either way.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") startPolling();
+  else stopPolling();
+});
+
+// -- listen -------------------------------------------------------------------
+
+const audio = $("audio");
+let listening = false;
+
+function setListenStatus(text) {
+  $("listen-status").textContent = text;
+}
+
+function startListening() {
+  listening = true;
+  $("btn-listen").classList.add("on");
+  setListenStatus("connecting…");
+  // A fresh URL each time so the browser never replays a stale buffer.
+  audio.src = `stream.ogg?t=${Date.now()}`;
+  audio.play().catch((e) => {
+    stopListening();
+    showError(`Audio: ${e.message}`);
+  });
+}
+
+function stopListening() {
+  listening = false;
+  $("btn-listen").classList.remove("on");
+  setListenStatus("off");
+  audio.pause();
+  // Dropping the source closes the connection, which stops the encoder on the server.
+  audio.removeAttribute("src");
+  audio.load();
+}
+
+$("btn-listen").addEventListener("click", () => (listening ? stopListening() : startListening()));
+audio.addEventListener("playing", () => listening && setListenStatus("live (1–3 s behind)"));
+audio.addEventListener("waiting", () => listening && setListenStatus("buffering…"));
+audio.addEventListener("error", () => {
+  if (!listening) return;
+  stopListening();
+  showError("Audio stream failed. Is the Mac output routed through the capture device?");
+});
+
+// -- output device ------------------------------------------------------------
+
+async function loadDevices(state) {
+  const data = state ?? (await (await request("device")).json());
+  const box = $("devices");
+  box.replaceChildren(
+    ...data.options.map((key) => {
+      const b = document.createElement("button");
+      b.textContent = DEVICE_LABELS[key] ?? key;
+      b.classList.toggle("on", data.current === key);
+      b.addEventListener("click", () => setDevice(key));
+      return b;
+    }),
+  );
+  $("output").hidden = data.options.length === 0;
+}
+
+async function setDevice(key) {
+  try {
+    const res = await request("device", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device: key }),
+    });
+    await loadDevices(await res.json());
+  } catch (e) {
+    showError(`Output: ${e.message}`);
+  }
+}
+
+// -- render -------------------------------------------------------------------
+
+$("btn-render").addEventListener("click", async () => {
+  const btn = $("btn-render");
+  btn.disabled = true;
+  $("render-status").textContent = "rendering…";
+  try {
+    const data = await (await request("render", { method: "POST" })).json();
+    $("render-status").textContent = data.name;
+    const player = $("render-audio");
+    player.src = data.url;
+    player.hidden = false;
+  } catch (e) {
+    $("render-status").textContent = "";
+    showError(`Render: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// -- boot ---------------------------------------------------------------------
+
+async function boot() {
+  startPolling();
+  try {
+    await loadDevices();
+  } catch (e) {
+    showError(`Output: ${e.message}`);
+  }
+  // Render is optional: show the button only when the server has it configured.
+  try {
+    $("render").hidden = !(await (await request("render")).json()).enabled;
+  } catch {
+    $("render").hidden = true;
+  }
+}
+
+boot();

@@ -1,0 +1,39 @@
+[project]
+name = "reaper-remote"
+version = "0.1.0"
+description = "Control REAPER and listen to its output from a phone browser, over your own tailnet"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+reaper-remote = "reaper_remote.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server/reaper_remote"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/server"]
+pythonpath = ["server"]
+
+[tool.ruff]
+line-length = 100
+src = ["server"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
