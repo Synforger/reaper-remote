@@ -8,6 +8,7 @@ works at `/` locally and at `/ext/reaper/` behind `tailscale serve --set-path`.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -19,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.types import Scope
 
 from .config import DEVICE_KEYS, Config
 
@@ -36,6 +38,24 @@ EXTSTATE_SECTION = "reaper_remote"
 
 class DeviceRequest(BaseModel):
     device: str
+
+
+def ui_fingerprint(web_dir: Path) -> str:
+    """A short hash of the UI files, so an open page can tell the UI changed."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in web_dir.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(web_dir).as_posix().encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    """Static files that browsers must revalidate, so a reload picks up a new UI."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 async def _run(*args: str) -> tuple[int, str, str]:
@@ -231,7 +251,15 @@ def create_app(
         return FileResponse(path)
 
     # -- UI (mounted last so the routes above win) ----------------------------
-    app.mount("/", StaticFiles(directory=cfg.web_dir, html=True), name="web")
+    # Fixed at start-up: a restart with new UI files changes it, and open pages
+    # that see the change reload themselves.
+    ui = ui_fingerprint(cfg.web_dir)
+
+    @app.get("/version")
+    async def version() -> JSONResponse:
+        return JSONResponse({"ui": ui}, headers={"Cache-Control": "no-store"})
+
+    app.mount("/", RevalidatedStaticFiles(directory=cfg.web_dir, html=True), name="web")
     return app
 
 

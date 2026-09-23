@@ -349,6 +349,7 @@ function startListening() {
 
 function stopListening() {
   listening = false;
+  if (reloadPending) location.reload();
   mode = null;
   setListenStatus("off", "off");
   closeWebRtc();
@@ -436,9 +437,40 @@ $("btn-render").addEventListener("click", async () => {
   }
 });
 
+// -- self-update ---------------------------------------------------------------
+//
+// The server reports a fingerprint of its UI files. When it changes (a new
+// version was deployed and the server restarted), reload so the page never
+// keeps calling routes that no longer exist. Not while listening: that waits
+// until Listen is stopped.
+
+const VERSION_CHECK_MS = 30000;
+let loadedUi = null;
+let reloadPending = false;
+
+async function checkVersion() {
+  let ui;
+  try {
+    ui = (await (await request("version")).json()).ui;
+  } catch {
+    return; // server restarting or unreachable: try again next time
+  }
+  if (loadedUi === null) loadedUi = ui;
+  else if (ui !== loadedUi) {
+    if (listening) reloadPending = true;
+    else location.reload();
+  }
+}
+
+setInterval(() => document.visibilityState === "visible" && checkVersion(), VERSION_CHECK_MS);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") checkVersion();
+});
+
 // -- boot ---------------------------------------------------------------------
 
 async function boot() {
+  checkVersion();
   startPolling();
   try {
     await loadDevices();
