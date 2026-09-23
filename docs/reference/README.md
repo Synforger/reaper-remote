@@ -35,7 +35,7 @@ All paths are relative to where the server is mounted.
 | `GET` | `/stream.ogg` | live Ogg/Opus stream of `stream.input` (1–3 s behind). One encoder is shared by every listener: it starts with the first and stops when the last disconnects. A listener joining mid-stream first receives the header pages |
 | `GET` | `/hls/stream.m3u8` | live HLS playlist of AAC segments of `stream.input` (4–8 s behind), shaped to Apple's HLS authoring spec for live playlists (ten 2-second segments, `EXT-X-PROGRAM-DATE-TIME` on each). The first request starts the encoder and waits for the first segment; the encoder stops when the playlist has not been requested for 20 s |
 | `GET` | `/hls/<segment>.ts` | an HLS segment listed in the playlist |
-| `GET` | `/device` | `{"current": "multi", "name": "<device name>", "options": ["headphones", "multi", "blackhole"]}`. `current` is `null` when the output is none of the configured devices |
+| `GET` | `/device` | `{"current": "multi", "name": "<device name>", "options": ["headphones", "multi", "blackhole"], "available": ["multi", "blackhole"]}`. `current` is `null` when the output is none of the configured devices; `available` lists the configured devices that exist right now (a headphone-jack output exists only while something is plugged in) |
 | `POST` | `/device` | body `{"device": "headphones" \| "multi" \| "blackhole"}`; switches the Mac's system output and returns the same shape as `GET` |
 | `GET` | `/render` | `{"enabled": true \| false}` |
 | `POST` | `/render` | renders and returns `{"name": "<file>", "url": "renders/<file>"}` once the file has stopped growing |
@@ -47,7 +47,7 @@ Errors are JSON `{"detail": "..."}`:
 |---|---|
 | `400` | `POST /device` with an unknown key |
 | `404` | device key or `render` not configured; unknown rendered file |
-| `409` | `POST /render` while another render is running |
+| `409` | `POST /device` to a device that is not connected; `POST /render` while another render is running |
 | `500` | ffmpeg or SwitchAudioSource missing or failing |
 | `503` | the HLS encoder produced no playlist within 15 s |
 | `502` | REAPER's web interface unreachable or erroring |

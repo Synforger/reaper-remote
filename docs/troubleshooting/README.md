@@ -39,6 +39,12 @@ Mobile browsers may suspend media in background tabs. Keep the page in the
 foreground, or add it to the home screen and check whether playback continues
 there.
 
+## An output button is greyed out
+
+That device does not exist right now. On a Mac, the headphone-jack output
+appears only while something is plugged into the jack. Plug it in; the page
+picks it up within ten seconds.
+
 ## The render button is missing
 
 There is no `render` block in `config.json`. See Setup step 5.

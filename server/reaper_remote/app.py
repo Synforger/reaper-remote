@@ -7,6 +7,7 @@ works at `/` locally and at `/ext/reaper/` behind `tailscale serve --set-path`.
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import time
 from contextlib import asynccontextmanager
@@ -21,6 +22,8 @@ from pydantic import BaseModel
 
 from .config import DEVICE_KEYS, Config
 from .stream import HLS_PLAYLIST, HlsSession, OggBroadcast
+
+log = logging.getLogger("reaper_remote")
 
 PROXY_PREFIX = "/reaper/_/"
 PROXY_TIMEOUT_S = 5.0
@@ -61,6 +64,15 @@ def create_app(cfg: Config, reaper_transport: httpx.AsyncBaseTransport | None = 
     app = FastAPI(
         title="reaper-remote", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
     )
+
+    @app.exception_handler(HTTPException)
+    async def log_http_error(request: Request, exc: HTTPException) -> JSONResponse:
+        # The access log shows only the status; keep the reason next to it.
+        log.warning(
+            "%s %s -> %s: %s", request.method, request.url.path, exc.status_code, exc.detail
+        )
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
     render_lock = asyncio.Lock()
 
     async def reaper(commands: str, timeout: float = PROXY_TIMEOUT_S) -> str:
@@ -115,13 +127,24 @@ def create_app(cfg: Config, reaper_transport: httpx.AsyncBaseTransport | None = 
         return FileResponse(path, media_type="video/mp2t")
 
     # -- system output device -------------------------------------------------
-    async def current_device() -> dict:
+    async def switch_tool(*args: str) -> str:
         tool = cfg.devices.switch_audio_source
-        code, out, err = await _run(tool, "-c", "-t", "output")
+        code, out, err = await _run(tool, *args)
         if code != 0:
             raise HTTPException(500, f"{tool} failed: {err}")
+        return out
+
+    async def current_device() -> dict:
+        out = await switch_tool("-c", "-t", "output")
+        present = set((await switch_tool("-a", "-t", "output")).splitlines())
         key = next((k for k, v in cfg.devices.names.items() if v == out), None)
-        return {"current": key, "name": out, "options": list(cfg.devices.names)}
+        return {
+            "current": key,
+            "name": out,
+            "options": list(cfg.devices.names),
+            # A device can come and go (e.g. a headphone jack), so report what exists now.
+            "available": [k for k, v in cfg.devices.names.items() if v in present],
+        }
 
     @app.get("/device")
     async def get_device() -> dict:
@@ -134,10 +157,9 @@ def create_app(cfg: Config, reaper_transport: httpx.AsyncBaseTransport | None = 
         name = cfg.devices.names.get(req.device)
         if name is None:
             raise HTTPException(404, f"devices.{req.device} is not configured")
-        tool = cfg.devices.switch_audio_source
-        code, _, err = await _run(tool, "-t", "output", "-s", name)
-        if code != 0:
-            raise HTTPException(500, f"{tool} failed: {err}")
+        if req.device not in (await current_device())["available"]:
+            raise HTTPException(409, f"{name} is not connected")
+        await switch_tool("-t", "output", "-s", name)
         return await current_device()
 
     # -- render ---------------------------------------------------------------

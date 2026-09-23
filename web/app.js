@@ -17,6 +17,7 @@ const ACTION = { PLAY: 1007, PAUSE: 1008, STOP: 1016, GO_TO_START: 40042 };
 
 const POLL_MS = 500;
 const FADER_SEND_MS = 60;
+const DEVICE_REFRESH_MS = 10000;
 const DEVICE_LABELS = { headphones: "Headphones", multi: "Multi", blackhole: "BlackHole" };
 
 const $ = (id) => document.getElementById(id);
@@ -220,9 +221,16 @@ function stopPolling() {
 
 // Poll only while the page is on screen; audio keeps playing either way.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") startPolling();
-  else stopPolling();
+  if (document.visibilityState === "visible") {
+    startPolling();
+    loadDevices().catch((e) => showError(`Output: ${e.message}`));
+  } else stopPolling();
 });
+
+// Outputs appear and disappear (headphones plugged in or out), so refresh them.
+setInterval(() => {
+  if (document.visibilityState === "visible") loadDevices().catch(() => {});
+}, DEVICE_REFRESH_MS);
 
 // -- listen -------------------------------------------------------------------
 
@@ -289,6 +297,9 @@ async function loadDevices(state) {
       const b = document.createElement("button");
       b.textContent = DEVICE_LABELS[key] ?? key;
       b.classList.toggle("on", data.current === key);
+      // An output such as a headphone jack exists only while something is plugged in.
+      b.disabled = !data.available.includes(key);
+      b.title = b.disabled ? `${DEVICE_LABELS[key] ?? key}: not connected` : "";
       b.addEventListener("click", () => setDevice(key));
       return b;
     }),

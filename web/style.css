@@ -23,13 +23,20 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Sized to fit a host panel of about 340 px (40dvh on a phone) with master + five tracks. */
+/* Fills whatever height the host gives it: the fixed rows keep their size and
+   the track list shrinks its rows (32 px down to 20 px) to fit, scrolling only
+   when even the smallest rows do not. */
+html, body { height: 100%; }
+
 body {
   padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 6px;
+  overflow: hidden;
 }
+
+body > * { flex: 0 0 auto; }
 
 .row {
   display: flex;
@@ -89,12 +96,16 @@ button.icon { min-width: 40px; padding: 0; font-size: 17px; }
 }
 
 .segmented button + button { border-left: 1px solid var(--line); }
+.segmented button:disabled { opacity: 0.35; }
 .segmented button.on { background: var(--accent); color: #000; }
 
 .tracks {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  overflow-y: auto;
 }
 
 .track {
@@ -102,7 +113,8 @@ button.icon { min-width: 40px; padding: 0; font-size: 17px; }
   grid-template-columns: minmax(80px, 1.3fr) 32px 32px 2fr 44px;
   align-items: center;
   gap: 6px;
-  height: 32px;
+  flex: 0 1 32px;
+  min-height: 20px;
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -121,7 +133,7 @@ button.icon { min-width: 40px; padding: 0; font-size: 17px; }
 
 .track button {
   min-width: 0;
-  height: 24px;
+  height: min(24px, calc(100% - 4px));
   padding: 0;
   font-size: 12px;
 }
@@ -156,4 +168,12 @@ button.icon { min-width: 40px; padding: 0; font-size: 17px; }
   margin: 0;
   color: var(--danger);
   font-size: 12px;
+}
+
+/* Short panels: tighten the fixed rows too. */
+@media (max-height: 300px) {
+  body { padding-top: 4px; padding-bottom: calc(4px + env(safe-area-inset-bottom)); gap: 4px; }
+  button { height: 28px; }
+  .segmented button { height: 26px; }
+  .track { font-size: 13px; }
 }

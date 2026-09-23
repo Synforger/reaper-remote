@@ -62,6 +62,7 @@ def test_device_reports_current_key(client) -> None:
         "current": "headphones",
         "name": "Headphones Out",
         "options": ["headphones", "multi", "blackhole"],
+        "available": ["headphones", "multi", "blackhole"],
     }
 
 
@@ -80,6 +81,16 @@ def test_device_unconfigured_key_is_404(make_client, raw_config) -> None:
     del raw_config["devices"]["multi"]
     with make_client(raw_config) as c:
         assert c.post("/device", json={"device": "multi"}).status_code == 404
+
+
+def test_unplugged_device_is_reported_and_refused_with_409(client, tools) -> None:
+    # A headphone jack output disappears when nothing is plugged in.
+    tools["present"].write_text("Multi-Output\nBroken Device\n")
+    assert client.get("/device").json()["available"] == ["multi", "blackhole"]
+    r = client.post("/device", json={"device": "headphones"})
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Headphones Out is not connected"
+    assert tools["state"].read_text() == "Headphones Out"  # nothing was switched
 
 
 def test_device_tool_failure_is_surfaced(client) -> None:

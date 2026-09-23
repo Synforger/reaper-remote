@@ -62,11 +62,14 @@ def reaper() -> FakeReaper:
 def tools(tmp_path: Path) -> dict[str, Path]:
     state = tmp_path / "current-output"
     state.write_text("Headphones Out")
+    present = tmp_path / "present-outputs"
+    present.write_text("Headphones Out\nMulti-Output\nBroken Device\nSpeakers\n")
     switch = write_tool(
         tmp_path / "SwitchAudioSource",
         f"""
 state="{state}"
 if [ "$1" = "-c" ]; then cat "$state"; exit 0; fi
+if [ "$1" = "-a" ]; then cat "{present}"; exit 0; fi
 if [ "$3" = "-s" ]; then
   case "$4" in
     "Broken Device") echo "no such device" >&2; exit 1 ;;
@@ -107,6 +110,7 @@ while true; do cat "{audio}"; sleep 0.05; done
     return {
         "switch": switch,
         "state": state,
+        "present": present,
         "ffmpeg": ffmpeg,
         "pidfile": pidfile,
         "argsfile": argsfile,
