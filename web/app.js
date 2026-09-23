@@ -234,6 +234,12 @@ setInterval(() => {
 
 // -- listen -------------------------------------------------------------------
 //
+// The phone plays the Mac's audio whenever the Mac output includes the capture
+// device (Multi or BlackHole) and stops when it is Headphones. Phones only let
+// audio start from a tap, so a tap on Multi / BlackHole starts it; on opening
+// the page with one already selected, playback is attempted and, if the phone
+// refuses, waits for that tap.
+//
 // First choice is WebRTC (WHEP), a fraction of a second behind. If it cannot
 // connect, or drops later, the page falls back to Low-Latency HLS (1–2 s
 // behind), which plays wherever the browser has native HLS. Both come from
@@ -249,11 +255,21 @@ let pc = null; // RTCPeerConnection while on WebRTC
 let session = null; // WHEP session URL, for DELETE on stop
 let mode = null; // "webrtc" | "llhls"
 
-// The Listen button carries the state as its colour, and the words as its tooltip.
+const LISTEN_OUTPUTS = new Set(["multi", "blackhole"]);
+const TAP_TO_LISTEN = "tap Multi or BlackHole to listen";
+
+// The dot carries the state as its colour, and the words as its tooltip.
 function setListenStatus(state, text) {
-  const btn = $("btn-listen");
-  btn.dataset.state = state;
-  btn.title = `Listen: ${text}`;
+  const dot = $("listen-dot");
+  dot.dataset.state = state;
+  dot.title = `Phone audio: ${text}`;
+}
+
+// A play() refused for lack of a tap: give up quietly until the next tap.
+function onPlayRefused(e) {
+  if (!listening || e?.name !== "NotAllowedError") return;
+  stopListening();
+  setListenStatus("off", TAP_TO_LISTEN);
 }
 
 function waitIceGathering(peer) {
@@ -286,6 +302,12 @@ async function startWebRtc(stream) {
     body: peer.localDescription.sdp,
   });
   if (res.status !== 201) throw new Error(`WHEP answered ${res.status}`);
+  if (pc !== peer) {
+    // Listening stopped while the offer was in flight: end the new session now.
+    const late = res.headers.get("Location");
+    if (late) fetch(late, { method: "DELETE" }).catch(() => {});
+    throw new Error("stopped");
+  }
   session = res.headers.get("Location");
   await peer.setRemoteDescription({ type: "answer", sdp: await res.text() });
   await new Promise((resolve, reject) => {
@@ -328,11 +350,7 @@ function startLlHls(reason) {
   mode = "llhls";
   audio.srcObject = null;
   audio.src = LLHLS_URL;
-  audio.play().catch(() => {
-    // Outside the tap, a phone may refuse to start playback: ask for one more.
-    setListenStatus("buffering", "tap Listen again to resume");
-    listening = false;
-  });
+  audio.play().catch(onPlayRefused);
 }
 
 function startListening() {
@@ -343,7 +361,7 @@ function startListening() {
   // phones only allow audio to start from a user gesture.
   const stream = new MediaStream();
   audio.srcObject = stream;
-  audio.play().catch(() => {});
+  audio.play().catch(onPlayRefused);
   startWebRtc(stream).catch((e) => listening && startLlHls(e.message));
 }
 
@@ -359,7 +377,6 @@ function stopListening() {
   audio.load();
 }
 
-$("btn-listen").addEventListener("click", () => (listening ? stopListening() : startListening()));
 // Leaving the page ends the WebRTC session at once, rather than after
 // mediamtx notices the silence (about 30 s), so the capture stops sooner.
 window.addEventListener("pagehide", () => listening && closeWebRtc());
@@ -402,9 +419,32 @@ async function loadDevices(state) {
     }),
   );
   box.hidden = data.options.length === 0;
+  followOutput(data.current);
+}
+
+let autoplayTried = false;
+
+// Keep playback in step with the Mac output when it changes without a tap here
+// (another device, the Mac itself, or on opening the page).
+function followOutput(current) {
+  if (!LISTEN_OUTPUTS.has(current)) {
+    if (listening) stopListening();
+  } else if (!listening && !autoplayTried) {
+    // Once per page: without a tap the phone will most likely refuse.
+    autoplayTried = true;
+    startListening();
+  }
 }
 
 async function setDevice(key) {
+  // Decide playback inside the tap, before any await: phones only allow audio
+  // to start from within the tap's own event handler.
+  autoplayTried = true;
+  if (LISTEN_OUTPUTS.has(key)) {
+    if (!listening) startListening();
+  } else if (listening) {
+    stopListening();
+  }
   try {
     const res = await request("device", {
       method: "POST",
@@ -414,6 +454,8 @@ async function setDevice(key) {
     await loadDevices(await res.json());
   } catch (e) {
     showError(`Output: ${e.message}`);
+    // The switch failed: follow whatever the output really is.
+    loadDevices().catch(() => {});
   }
 }
 
