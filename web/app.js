@@ -233,12 +233,21 @@ function setListenStatus(text) {
   $("listen-status").textContent = text;
 }
 
+// Prefer native HLS where the browser has it (Safari on iOS and macOS, recent
+// Chrome): iOS Safari plays live Ogg/Opus at the wrong speed. Browsers without
+// native HLS get the lower-latency Ogg stream.
+const useHls = audio.canPlayType("application/vnd.apple.mpegurl") !== "";
+
+function streamUrl() {
+  // A fresh URL each time so the browser never replays a stale buffer.
+  return useHls ? "hls/stream.m3u8" : `stream.ogg?t=${Date.now()}`;
+}
+
 function startListening() {
   listening = true;
   $("btn-listen").classList.add("on");
   setListenStatus("connecting…");
-  // A fresh URL each time so the browser never replays a stale buffer.
-  audio.src = `stream.ogg?t=${Date.now()}`;
+  audio.src = streamUrl();
   audio.play().catch((e) => {
     stopListening();
     showError(`Audio: ${e.message}`);
@@ -256,7 +265,9 @@ function stopListening() {
 }
 
 $("btn-listen").addEventListener("click", () => (listening ? stopListening() : startListening()));
-audio.addEventListener("playing", () => listening && setListenStatus("live (1–3 s behind)"));
+audio.addEventListener("playing", () =>
+  listening && setListenStatus(useHls ? "live (4–8 s behind)" : "live (1–3 s behind)"),
+);
 audio.addEventListener("waiting", () => listening && setListenStatus("buffering…"));
 audio.addEventListener("error", () => {
   if (!listening) return;

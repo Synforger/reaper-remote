@@ -7,6 +7,7 @@ works at `/` locally and at `/ext/reaper/` behind `tailscale serve --set-path`.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,30 +20,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .config import DEVICE_KEYS, Config
+from .stream import HLS_PLAYLIST, HlsSession, OggBroadcast
 
 PROXY_PREFIX = "/reaper/_/"
 PROXY_TIMEOUT_S = 5.0
-STREAM_CHUNK_BYTES = 4096
 RENDER_POLL_S = 0.5
 EXTSTATE_SECTION = "reaper_remote"
 
 
 class DeviceRequest(BaseModel):
     device: str
-
-
-def ffmpeg_args(cfg: Config) -> list[str]:
-    """Capture the configured input device and encode it as a live Ogg/Opus stream."""
-    s = cfg.stream
-    return [
-        s.ffmpeg,
-        "-hide_banner", "-loglevel", "error", "-nostdin",
-        "-f", "avfoundation", "-i", f":{s.input}",
-        "-ac", "2",
-        "-c:a", "libopus", "-b:a", s.bitrate, "-application", "audio",
-        "-f", "ogg", "-flush_packets", "1",
-        "pipe:1",
-    ]  # fmt: skip
 
 
 async def _run(*args: str) -> tuple[int, str, str]:
@@ -62,9 +49,13 @@ def create_app(cfg: Config, reaper_transport: httpx.AsyncBaseTransport | None = 
         base_url=cfg.reaper_url, timeout=PROXY_TIMEOUT_S, transport=reaper_transport
     )
 
+    ogg = OggBroadcast(cfg)
+    hls = HlsSession(cfg)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
+        await hls.close()
         await client.aclose()
 
     app = FastAPI(
@@ -87,38 +78,41 @@ def create_app(cfg: Config, reaper_transport: httpx.AsyncBaseTransport | None = 
         # Use the raw path so `;`, `%2F` and friends reach REAPER exactly as sent.
         raw = request.scope["raw_path"].decode("latin-1")
         commands = raw[raw.index(PROXY_PREFIX) + len(PROXY_PREFIX) :]
+        # Front proxies (tailscale serve among them) may percent-encode the
+        # `;` separator, and REAPER only splits on a literal `;`.
+        commands = commands.replace("%3B", ";").replace("%3b", ";")
         body = await reaper(commands)
         return Response(body, media_type="text/plain", headers={"Cache-Control": "no-store"})
 
     # -- live audio -----------------------------------------------------------
     @app.get("/stream.ogg")
-    async def stream() -> StreamingResponse:
-        # One encoder per listener, started on connect and killed on disconnect,
-        # so nothing is encoding while nobody listens and every listener gets
-        # a stream that begins with valid Ogg headers.
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *ffmpeg_args(cfg),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                stdin=asyncio.subprocess.DEVNULL,
-            )
-        except FileNotFoundError as e:
-            raise HTTPException(500, f"ffmpeg not found: {cfg.stream.ffmpeg}") from e
-
-        async def body():
-            try:
-                assert proc.stdout is not None
-                while chunk := await proc.stdout.read(STREAM_CHUNK_BYTES):
-                    yield chunk
-            finally:
-                if proc.returncode is None:
-                    proc.kill()
-                await proc.wait()
-
+    async def stream_ogg() -> StreamingResponse:
+        # One shared encoder for every listener; it stops with the last one.
+        if shutil.which(cfg.stream.ffmpeg) is None:
+            raise HTTPException(500, f"ffmpeg not found: {cfg.stream.ffmpeg}")
         return StreamingResponse(
-            body(), media_type="audio/ogg", headers={"Cache-Control": "no-store"}
+            ogg.listen(), media_type="audio/ogg", headers={"Cache-Control": "no-store"}
         )
+
+    @app.get("/hls/" + HLS_PLAYLIST)
+    async def hls_playlist() -> FileResponse:
+        if shutil.which(cfg.stream.ffmpeg) is None:
+            raise HTTPException(500, f"ffmpeg not found: {cfg.stream.ffmpeg}")
+        path = await hls.playlist()
+        if path is None:
+            raise HTTPException(503, "the HLS encoder did not produce a playlist")
+        return FileResponse(
+            path,
+            media_type="application/vnd.apple.mpegurl",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/hls/{name}")
+    async def hls_segment(name: str) -> FileResponse:
+        path = hls.segment(name)
+        if path is None:
+            raise HTTPException(404)
+        return FileResponse(path, media_type="video/mp2t")
 
     # -- system output device -------------------------------------------------
     async def current_device() -> dict:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import socket
 import stat
+import struct
 import threading
 import time
 from collections.abc import Iterator
@@ -14,6 +15,19 @@ import uvicorn
 
 from reaper_remote.app import create_app
 from reaper_remote.config import parse
+
+
+def ogg_page(granule: int, payload: bytes) -> bytes:
+    """A structurally valid Ogg page (CRC left zero; the server does not check it)."""
+    assert len(payload) < 255
+    return (
+        b"OggS"
+        + bytes([0, 0])
+        + struct.pack("<q", granule)
+        + b"\0" * 12
+        + bytes([1, len(payload)])
+        + payload
+    )
 
 
 def write_tool(path: Path, body: str) -> Path:
@@ -64,13 +78,30 @@ exit 2
     )
     pidfile = tmp_path / "ffmpeg.pid"
     argsfile = tmp_path / "ffmpeg.args"
+    header = tmp_path / "ogg-header.bin"
+    header.write_bytes(ogg_page(0, b"OpusHead-fake") + ogg_page(0, b"OpusTags-fake"))
+    audio = tmp_path / "ogg-audio.bin"
+    audio.write_bytes(ogg_page(960, b"audio-" * 20))
+    # Appends one pid per start, so tests can count encoders. In HLS mode the
+    # last argument is the playlist path; otherwise Ogg pages go to stdout.
     ffmpeg = write_tool(
         tmp_path / "ffmpeg",
         f"""
-echo $$ > "{pidfile}"
+echo $$ >> "{pidfile}"
 printf '%s\\n' "$@" > "{argsfile}"
-printf 'OggS-fake-header'
-while true; do printf 'chunk'; sleep 0.05; done
+for last; do :; done
+case " $* " in
+  *" -f hls "*)
+    dir=$(dirname "$last")
+    i=0
+    while true; do
+      printf 'segment-%s' "$i" > "$dir/seg0000$i.ts"
+      printf '#EXTM3U\\n#EXTINF:2.0,\\nseg0000%s.ts\\n' "$i" > "$last"
+      i=$((i+1)); sleep 0.2
+    done ;;
+esac
+cat "{header}"
+while true; do cat "{audio}"; sleep 0.05; done
 """,
     )
     return {

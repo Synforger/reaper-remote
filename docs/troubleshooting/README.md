@@ -25,6 +25,14 @@ ffmpeg -i /tmp/probe.ogg -af volumedetect -f null - 2>&1 | grep max_volume
 
 `max_volume` around `-91 dB` means silence reached the encoder.
 
+## Audio on iPhone plays too fast or sounds folded
+
+That is iOS Safari playing the live Ogg/Opus stream. The page picks HLS
+whenever the browser supports it natively, so this only happens on an older
+page still cached in the browser: reload it. Check which stream a browser
+uses with `audio.canPlayType("application/vnd.apple.mpegurl")` (non-empty
+means HLS).
+
 ## Listen stops when the phone locks or the browser goes to the background
 
 Mobile browsers may suspend media in background tabs. Keep the page in the
