@@ -233,9 +233,21 @@ setInterval(() => {
 }, DEVICE_REFRESH_MS);
 
 // -- listen -------------------------------------------------------------------
+//
+// First choice is WebRTC (WHEP), a fraction of a second behind. If it cannot
+// connect, or drops later, the page falls back to Low-Latency HLS (1–2 s
+// behind), which plays wherever the browser has native HLS. Both come from
+// mediamtx through this app's `whep` and `llhls/` routes.
 
 const audio = $("audio");
+const WHEP_CONNECT_TIMEOUT_MS = 6000;
+const LLHLS_URL = "llhls/index.m3u8";
+const canHls = audio.canPlayType("application/vnd.apple.mpegurl") !== "";
+
 let listening = false;
+let pc = null; // RTCPeerConnection while on WebRTC
+let session = null; // WHEP session URL, for DELETE on stop
+let mode = null; // "webrtc" | "llhls"
 
 // The Listen button carries the state as its colour, and the words as its tooltip.
 function setListenStatus(state, text) {
@@ -244,47 +256,131 @@ function setListenStatus(state, text) {
   btn.title = `Listen: ${text}`;
 }
 
-// Prefer native HLS where the browser has it (Safari on iOS and macOS, recent
-// Chrome): iOS Safari plays live Ogg/Opus at the wrong speed. Browsers without
-// native HLS get the lower-latency Ogg stream.
-const useHls = audio.canPlayType("application/vnd.apple.mpegurl") !== "";
+function waitIceGathering(peer) {
+  if (peer.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => peer.iceGatheringState === "complete" && resolve();
+    peer.addEventListener("icegatheringstatechange", done);
+    // Host candidates are enough on a tailnet; do not wait forever for others.
+    setTimeout(resolve, 1500);
+  });
+}
 
-function streamUrl() {
-  // A fresh URL each time so the browser never replays a stale buffer.
-  return useHls ? "hls/stream.m3u8" : `stream.ogg?t=${Date.now()}`;
+async function startWebRtc(stream) {
+  const peer = new RTCPeerConnection();
+  pc = peer;
+  peer.addTransceiver("audio", { direction: "recvonly" });
+  peer.addEventListener("track", (e) => {
+    // Browsers do not start playback for tracks added to an already attached
+    // stream; attach a stream holding the track and play again. The element was
+    // started inside the tap, which lets this later play() through on phones.
+    stream.addTrack(e.track);
+    audio.srcObject = new MediaStream([e.track]);
+    audio.play().catch(() => {});
+  });
+  await peer.setLocalDescription(await peer.createOffer());
+  await waitIceGathering(peer);
+  const res = await fetch("whep", {
+    method: "POST",
+    headers: { "Content-Type": "application/sdp" },
+    body: peer.localDescription.sdp,
+  });
+  if (res.status !== 201) throw new Error(`WHEP answered ${res.status}`);
+  session = res.headers.get("Location");
+  await peer.setRemoteDescription({ type: "answer", sdp: await res.text() });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("WebRTC did not connect")), WHEP_CONNECT_TIMEOUT_MS);
+    peer.addEventListener("connectionstatechange", () => {
+      if (peer.connectionState === "connected") {
+        clearTimeout(timer);
+        resolve();
+      } else if (peer.connectionState === "failed") {
+        clearTimeout(timer);
+        reject(new Error("WebRTC connection failed"));
+      }
+    });
+  });
+  // A later drop (network change, the phone locking) falls back to LL-HLS.
+  peer.addEventListener("connectionstatechange", () => {
+    if (listening && pc === peer && ["failed", "disconnected"].includes(peer.connectionState)) {
+      startLlHls("WebRTC dropped");
+    }
+  });
+}
+
+function closeWebRtc() {
+  if (session) fetch(session, { method: "DELETE" }).catch(() => {});
+  if (pc) pc.close();
+  pc = null;
+  session = null;
+}
+
+let llhlsRetried = false;
+
+function startLlHls(reason) {
+  closeWebRtc();
+  llhlsRetried = false;
+  if (!canHls) {
+    stopListening();
+    showError(`Audio: ${reason}, and this browser has no native HLS to fall back to.`);
+    return;
+  }
+  mode = "llhls";
+  audio.srcObject = null;
+  audio.src = LLHLS_URL;
+  audio.play().catch(() => {
+    // Outside the tap, a phone may refuse to start playback: ask for one more.
+    setListenStatus("buffering", "tap Listen again to resume");
+    listening = false;
+  });
 }
 
 function startListening() {
   listening = true;
-  $("btn-listen").classList.add("on");
+  mode = "webrtc";
   setListenStatus("connecting", "connecting…");
-  audio.src = streamUrl();
-  audio.play().catch((e) => {
-    stopListening();
-    showError(`Audio: ${e.message}`);
-  });
+  // Start playback inside the tap, on a stream that tracks are added to later;
+  // phones only allow audio to start from a user gesture.
+  const stream = new MediaStream();
+  audio.srcObject = stream;
+  audio.play().catch(() => {});
+  startWebRtc(stream).catch((e) => listening && startLlHls(e.message));
 }
 
 function stopListening() {
   listening = false;
-  $("btn-listen").classList.remove("on");
+  mode = null;
   setListenStatus("off", "off");
+  closeWebRtc();
   audio.pause();
-  // Dropping the source closes the connection, which stops the encoder on the server.
+  audio.srcObject = null;
   audio.removeAttribute("src");
   audio.load();
 }
 
 $("btn-listen").addEventListener("click", () => (listening ? stopListening() : startListening()));
-audio.addEventListener(
-  "playing",
-  () => listening && setListenStatus("live", useHls ? "live, 4–8 s behind" : "live, 1–3 s behind"),
-);
+// Leaving the page ends the WebRTC session at once, rather than after
+// mediamtx notices the silence (about 30 s), so the capture stops sooner.
+window.addEventListener("pagehide", () => listening && closeWebRtc());
+audio.addEventListener("playing", () => {
+  if (!listening) return;
+  setListenStatus("live", mode === "webrtc" ? "live over WebRTC" : "live over LL-HLS, 1–2 s behind");
+});
 audio.addEventListener("waiting", () => listening && setListenStatus("buffering", "buffering…"));
 audio.addEventListener("error", () => {
-  if (!listening) return;
+  if (!listening || mode !== "llhls") return;
+  if (!llhlsRetried) {
+    // A player can fail on a stream that has only just started; try once more.
+    llhlsRetried = true;
+    setTimeout(() => {
+      if (!listening) return;
+      audio.src = LLHLS_URL;
+      audio.play().catch(() => {});
+    }, 1000);
+    return;
+  }
   stopListening();
-  showError("Audio stream failed. Is the Mac output routed through the capture device?");
+  showError("Audio stream failed. Is mediamtx running, and the Mac output routed to the capture device?");
 });
 
 // -- output device ------------------------------------------------------------

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import socket
 import stat
-import struct
 import threading
 import time
 from collections.abc import Iterator
@@ -15,19 +14,6 @@ import uvicorn
 
 from reaper_remote.app import create_app
 from reaper_remote.config import parse
-
-
-def ogg_page(granule: int, payload: bytes) -> bytes:
-    """A structurally valid Ogg page (CRC left zero; the server does not check it)."""
-    assert len(payload) < 255
-    return (
-        b"OggS"
-        + bytes([0, 0])
-        + struct.pack("<q", granule)
-        + b"\0" * 12
-        + bytes([1, len(payload)])
-        + payload
-    )
 
 
 def write_tool(path: Path, body: str) -> Path:
@@ -53,10 +39,46 @@ class FakeReaper:
         return httpx.Response(self.status, text=self.reply)
 
 
+class FakeMedia:
+    """Stands in for mediamtx's WebRTC and HLS HTTP servers."""
+
+    def __init__(self) -> None:
+        self.requests: list[httpx.Request] = []
+        self.down = False
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        if self.down:
+            raise httpx.ConnectError("connection refused", request=request)
+        self.requests.append(request)
+        path = request.url.path
+        if request.method == "POST" and path == "/reaper/whep":
+            return httpx.Response(
+                201,
+                text="v=0 answer",
+                headers={
+                    "Content-Type": "application/sdp",
+                    "Location": "/reaper/whep/3f2a-session",
+                    "ETag": "*",
+                    "Set-Cookie": "leak=1",
+                },
+            )
+        if path.startswith("/reaper/whep/"):
+            return httpx.Response(200)
+        if path == "/reaper/index.m3u8":
+            if request.url.params.get("cookieCheck") != "1":
+                return httpx.Response(302, headers={"Location": "/reaper/index.m3u8?cookieCheck=1"})
+            return httpx.Response(
+                200,
+                text="#EXTM3U\nstream.m3u8?session=abc\n",
+                headers={"Content-Type": "application/vnd.apple.mpegurl"},
+            )
+        return httpx.Response(404)
+
+
 class FakeDevice:
     """Stands in for the CoreAudio input: a thread delivering PCM blocks."""
 
-    RATE = 44100
+    RATE = 48000
     BLOCK = b"\x01\x02\x03\x04" * 256
 
     def __init__(self) -> None:
@@ -99,6 +121,11 @@ def device() -> FakeDevice:
 
 
 @pytest.fixture
+def media() -> FakeMedia:
+    return FakeMedia()
+
+
+@pytest.fixture
 def reaper() -> FakeReaper:
     return FakeReaper()
 
@@ -125,36 +152,14 @@ exit 2
 """,
     )
     pcmfile = tmp_path / "ffmpeg.stdin"
-    pidfile = tmp_path / "ffmpeg.pid"
     argsfile = tmp_path / "ffmpeg.args"
-    header = tmp_path / "ogg-header.bin"
-    header.write_bytes(ogg_page(0, b"OpusHead-fake") + ogg_page(0, b"OpusTags-fake"))
-    audio = tmp_path / "ogg-audio.bin"
-    audio.write_bytes(ogg_page(960, b"audio-" * 20))
-    # Appends one pid per start, so tests can count encoders. In HLS mode the
-    # last argument is the playlist path; otherwise Ogg pages go to stdout.
+    # Stands in for the publishing ffmpeg: records its arguments, then copies
+    # 8 KiB of PCM from stdin and exits (as ffmpeg does when its input ends).
     ffmpeg = write_tool(
         tmp_path / "ffmpeg",
         f"""
-echo $$ >> "{pidfile}"
 printf '%s\\n' "$@" > "{argsfile}"
-# POSIX gives a background job /dev/null as stdin before its own redirections
-# apply, so hand the real stdin over on another descriptor.
-exec 3<&0
-cat <&3 >> "{pcmfile}" &
-for last; do :; done
-case " $* " in
-  *" -f hls "*)
-    dir=$(dirname "$last")
-    i=0
-    while true; do
-      printf 'segment-%s' "$i" > "$dir/seg0000$i.ts"
-      printf '#EXTM3U\\n#EXTINF:2.0,\\nseg0000%s.ts\\n' "$i" > "$last"
-      i=$((i+1)); sleep 0.2
-    done ;;
-esac
-cat "{header}"
-while true; do cat "{audio}"; sleep 0.05; done
+head -c 8192 > "{pcmfile}"
 """,
     )
     return {
@@ -162,7 +167,6 @@ while true; do cat "{audio}"; sleep 0.05; done
         "state": state,
         "present": present,
         "ffmpeg": ffmpeg,
-        "pidfile": pidfile,
         "pcmfile": pcmfile,
         "argsfile": argsfile,
         "render_dir": tmp_path / "renders",
@@ -185,14 +189,16 @@ def raw_config(tools: dict[str, Path]) -> dict:
 
 
 @contextmanager
-def serve(raw: dict, reaper: FakeReaper, device: FakeDevice) -> Iterator[httpx.Client]:
+def serve(raw: dict, reaper: FakeReaper, media: FakeMedia) -> Iterator[httpx.Client]:
     """Run the app under a real uvicorn server on a free loopback port.
 
     A real server (not TestClient) is used throughout: only it delivers the
     listener's disconnect to the app, which the stream endpoint depends on.
     """
     app = create_app(
-        parse(raw), reaper_transport=httpx.MockTransport(reaper.handler), open_stream=device.open
+        parse(raw),
+        reaper_transport=httpx.MockTransport(reaper.handler),
+        media_transport=httpx.MockTransport(media.handler),
     )
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -213,9 +219,9 @@ def serve(raw: dict, reaper: FakeReaper, device: FakeDevice) -> Iterator[httpx.C
 
 
 @pytest.fixture
-def make_client(reaper: FakeReaper, device: FakeDevice):
+def make_client(reaper: FakeReaper, media: FakeMedia):
     def make(raw: dict):
-        return serve(raw, reaper, device)
+        return serve(raw, reaper, media)
 
     return make
 

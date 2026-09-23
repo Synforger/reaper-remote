@@ -33,6 +33,15 @@ class StreamConfig:
 
 
 @dataclass(frozen=True)
+class MediaConfig:
+    """Where mediamtx serves the stream (loopback; this app relays to it)."""
+
+    webrtc: str = "http://127.0.0.1:8889"
+    hls: str = "http://127.0.0.1:8888"
+    path: str = "reaper"
+
+
+@dataclass(frozen=True)
 class DeviceConfig:
     names: dict[str, str]
     switch_audio_source: str = "SwitchAudioSource"
@@ -51,6 +60,7 @@ class Config:
     stream: StreamConfig
     devices: DeviceConfig
     render: RenderConfig | None
+    media: MediaConfig = field(default_factory=MediaConfig)
     host: str = "127.0.0.1"
     port: int = 8090
     web_dir: Path = field(default=REPO_ROOT / "web")
@@ -72,7 +82,7 @@ def parse(raw: dict) -> Config:
     top = _take(
         raw,
         "config",
-        {"host", "port", "reaper_url", "stream", "devices", "render"},
+        {"host", "port", "reaper_url", "stream", "devices", "render", "media"},
         {"reaper_url", "stream", "devices"},
     )
 
@@ -98,7 +108,13 @@ def parse(raw: dict) -> Config:
             timeout_s=float(r.get("timeout_s", 600.0)),
         )
 
+    m = _take(top.get("media", {}), "media", {"webrtc", "hls", "path"}, set())
+    media = MediaConfig(
+        **{k: str(v).rstrip("/") if k != "path" else str(v).strip("/") for k, v in m.items()}
+    )
+
     return Config(
+        media=media,
         host=str(top.get("host", "127.0.0.1")),
         port=int(top.get("port", 8090)),
         reaper_url=str(top["reaper_url"]).rstrip("/"),

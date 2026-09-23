@@ -71,3 +71,20 @@ def test_shipped_example_parses() -> None:
     cfg = parse(raw)
     assert set(cfg.devices.names) == {"headphones", "multi", "blackhole"}
     assert cfg.render is not None
+
+
+def test_media_defaults_to_loopback_mediamtx() -> None:
+    cfg = parse(minimal())
+    assert (cfg.media.webrtc, cfg.media.hls, cfg.media.path) == (
+        "http://127.0.0.1:8889",
+        "http://127.0.0.1:8888",
+        "reaper",
+    )
+
+
+def test_media_can_be_pointed_elsewhere_and_rejects_typos() -> None:
+    raw = minimal() | {"media": {"webrtc": "http://127.0.0.1:18889/", "path": "/mix/"}}
+    cfg = parse(raw)
+    assert (cfg.media.webrtc, cfg.media.path) == ("http://127.0.0.1:18889", "mix")
+    with pytest.raises(ConfigError, match="unknown key"):
+        parse(minimal() | {"media": {"whep": "x"}})

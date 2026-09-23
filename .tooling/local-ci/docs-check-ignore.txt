@@ -15,3 +15,6 @@ task install:core   # back-port task lives in root Taskfile.yml at template stat
 ./config.json         # the user's own config file; git-ignored, so it never exists in the repository
 text/plain            # MIME type in the HTTP API table, not a path
 SET/TRACK/1/VOL/0.5   # REAPER web interface command in the HTTP API table, not a path
+mediamtx/mediamtx.yml # the user's own mediamtx config; git-ignored, so it never exists in the repository
+application/sdp       # MIME type in the HTTP API table, not a path
+llhls/index.m3u8      # URL path served by the app (relayed from mediamtx), not a file

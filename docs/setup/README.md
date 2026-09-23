@@ -5,7 +5,7 @@ All steps run on the Mac that runs REAPER.
 ## 1. Install the tools
 
 ```bash
-brew install uv ffmpeg switchaudio-osx blackhole-2ch go-task
+brew install uv mediamtx ffmpeg switchaudio-osx blackhole-2ch go-task
 git clone https://github.com/Synforger/reaper-remote.git
 cd reaper-remote
 task setup
@@ -70,7 +70,23 @@ none) of the master mix into `render.dir`, using the project's current render
 format, and restores the project's render settings afterwards. Leave the
 `render` block out to hide the render button.
 
-## 6. Run it
+## 6. Configure mediamtx
+
+mediamtx distributes the live audio. Copy the example and point its
+`runOnDemand` line at this checkout:
+
+```bash
+cp mediamtx/mediamtx.example.yml mediamtx/mediamtx.yml
+# edit mediamtx/mediamtx.yml: /path/to/reaper-remote -> the absolute path of this checkout
+mediamtx mediamtx/mediamtx.yml
+```
+
+Its HTTP servers listen on loopback only; reaper-remote relays to them. The
+audio itself travels over WebRTC's UDP port 8189, which must be reachable from
+the phone (on a tailnet it is, with no extra configuration). `mediamtx.yml` is
+git-ignored.
+
+## 7. Run it
 
 ```bash
 task run
@@ -78,12 +94,13 @@ task run
 
 Open `http://127.0.0.1:8090/` on the Mac to check.
 
-The first time the stream is opened, macOS asks whether the server's process
-(the terminal, or the Python binary when launchd starts it) may use the
-microphone. Allow it: BlackHole is
+The first time someone listens, macOS asks whether the capturing process may
+use the microphone. mediamtx starts that process (`reaper-remote publish`), so
+the request is made on behalf of whatever started mediamtx: the terminal, or
+the mediamtx binary when launchd starts it. Allow it: BlackHole is
 an input device, and without that permission the stream is silent.
 
-## 7. Reach it from the phone
+## 8. Reach it from the phone
 
 ```bash
 tailscale serve --bg --set-path=/ext/reaper http://127.0.0.1:8090
@@ -93,7 +110,7 @@ Open `https://<your-mac>.<your-tailnet>.ts.net/ext/reaper/` (keep the trailing
 slash). Serve strips the path prefix before forwarding, and the UI only uses
 relative URLs, so any prefix works.
 
-## 8. (Optional) Start at login
+## 9. (Optional) Start at login
 
 Save as `~/Library/LaunchAgents/com.example.reaper-remote.plist`, replacing
 the two paths:
@@ -124,5 +141,9 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.reaper-remot
 ```
 
 `PATH` must contain `ffmpeg` and `SwitchAudioSource` (or give their full paths
-in `config.json`). A server started by launchd asks for microphone access on
+in `config.json`).
+
+Run mediamtx the same way, with a second LaunchAgent whose `ProgramArguments`
+are the mediamtx binary (`/opt/homebrew/bin/mediamtx`) and the absolute path
+of `mediamtx/mediamtx.yml`. A server started by launchd asks for microphone access on
 its own; allow it once.
