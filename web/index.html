@@ -18,8 +18,12 @@
 
   <section class="row listen">
     <button id="btn-listen" class="toggle wide">🎧 Listen</button>
-    <span id="listen-status" class="muted">off</span>
+    <span id="listen-status" class="muted status">off</span>
     <audio id="audio" preload="none"></audio>
+    <span class="render" id="render" hidden>
+      <span id="render-status" class="muted status"></span>
+      <button id="btn-render" class="wide">⤓ Render</button>
+    </span>
   </section>
 
   <section class="row output" id="output" hidden>
@@ -29,10 +33,6 @@
 
   <section class="tracks" id="tracks"></section>
 
-  <section class="row render" id="render" hidden>
-    <button id="btn-render" class="wide">Render selection</button>
-    <span id="render-status" class="muted"></span>
-  </section>
   <audio id="render-audio" controls hidden></audio>
 
   <p id="error" class="error" hidden></p>

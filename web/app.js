@@ -313,7 +313,8 @@ $("btn-render").addEventListener("click", async () => {
   $("render-status").textContent = "rendering…";
   try {
     const data = await (await request("render", { method: "POST" })).json();
-    $("render-status").textContent = data.name;
+    $("render-status").textContent = "ready";
+    $("render-status").title = data.name;
     const player = $("render-audio");
     player.src = data.url;
     player.hidden = false;

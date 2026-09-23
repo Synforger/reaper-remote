@@ -23,11 +23,12 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Sized to fit a host panel of about 420 px with five tracks, without scrolling. */
 body {
-  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .row {
@@ -37,8 +38,8 @@ body {
 }
 
 button {
-  min-width: 44px;
-  height: 36px;
+  min-width: 40px;
+  height: 32px;
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -62,6 +63,15 @@ button:disabled { opacity: 0.5; }
 
 .position.playing { color: var(--on); }
 .muted { color: var(--muted); font-size: 12px; }
+.status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.render {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .label { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
 .segmented {
@@ -74,6 +84,7 @@ button:disabled { opacity: 0.5; }
 
 .segmented button {
   flex: 1;
+  height: 30px;
   border: 0;
   border-radius: 0;
   font-size: 13px;
@@ -85,7 +96,7 @@ button:disabled { opacity: 0.5; }
 .tracks {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .track {
@@ -93,7 +104,8 @@ button:disabled { opacity: 0.5; }
   grid-template-columns: minmax(80px, 1.3fr) 32px 32px 2fr 44px;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  height: 34px;
+  padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -111,7 +123,7 @@ button:disabled { opacity: 0.5; }
 
 .track button {
   min-width: 0;
-  height: 28px;
+  height: 26px;
   padding: 0;
   font-size: 12px;
 }
@@ -140,7 +152,7 @@ button:disabled { opacity: 0.5; }
 
 .track .meter.hot { background: var(--danger); }
 
-#render-audio { width: 100%; }
+#render-audio { width: 100%; height: 32px; }
 
 .error {
   margin: 0;
