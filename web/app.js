@@ -219,7 +219,7 @@ function stopPolling() {
   polling = null;
 }
 
-// Poll only while the page is on screen; audio keeps playing either way.
+// Poll only while the page is on screen.
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     startPolling();
@@ -401,6 +401,31 @@ audio.addEventListener("error", () => {
   showError("Audio stream failed. Is mediamtx running, and the Mac output routed to the capture device?");
 });
 
+// Audio plays only while the app is on screen. Going to the background (home
+// screen, another app, the lock screen) stops it and ends the WebRTC session;
+// coming back resumes it if the Mac output still includes the capture device.
+// Folding the host's panel keeps the page visible, so it keeps playing.
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "hidden") {
+    if (listening) {
+      resumeOnVisible = true;
+      stopListening();
+      setListenStatus("off", "paused while in the background");
+    }
+    return;
+  }
+  if (!resumeOnVisible) return;
+  resumeOnVisible = false;
+  setListenStatus("off", "off");
+  try {
+    await loadDevices(); // the output may have changed meanwhile
+  } catch {
+    return;
+  }
+  // Without a tap the phone may refuse; the dot then waits for one.
+  if (!listening && LISTEN_OUTPUTS.has(lastOutput)) startListening();
+});
+
 // -- output device ------------------------------------------------------------
 
 async function loadDevices(state) {
@@ -423,10 +448,13 @@ async function loadDevices(state) {
 }
 
 let autoplayTried = false;
+let lastOutput = null; // the Mac output as last reported by the server
+let resumeOnVisible = false;
 
 // Keep playback in step with the Mac output when it changes without a tap here
 // (another device, the Mac itself, or on opening the page).
 function followOutput(current) {
+  lastOutput = current;
   if (!LISTEN_OUTPUTS.has(current)) {
     if (listening) stopListening();
   } else if (!listening && !autoplayTried) {

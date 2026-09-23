@@ -30,7 +30,8 @@ phone browser ──https──▶ tailscale serve ──▶ reaper-remote (127.
   you HTTPS and limits access to your tailnet.
 - The phone plays the Mac's audio whenever the Mac output is Multi-Output or
   BlackHole, and stops when it is Headphones: choosing the output is choosing
-  where you listen. A dot next to the switch shows the phone's state.
+  where you listen. A dot next to the switch shows the phone's state. Audio
+  plays only while the page is on screen and resumes when you come back.
 - Live audio is distributed by [mediamtx](https://github.com/bluenviron/mediamtx):
   WebRTC (WHEP) first, a fraction of a second behind, with Low-Latency HLS
   (1–2 seconds) as the fallback. reaper-remote relays the signalling and the
