@@ -1,6 +1,6 @@
 [project]
 name = "reaper-remote"
-version = "0.0.0"
+version = "0.1.0"
 description = "Control REAPER and listen to its output from a phone browser, over your own tailnet"
 readme = "README.md"
 license = "Apache-2.0"
