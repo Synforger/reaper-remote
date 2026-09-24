@@ -49,6 +49,7 @@ All paths are relative to where the server is mounted.
 | `GET` | `/renders/<file>` | a rendered file |
 | `GET` | `/loop` | `{"enabled": true \| false}` |
 | `POST` | `/loop` | body `{"start": <s>, "end": <s>}` (seconds, `0 <= start < end`); sets the loop points through the loop script, turns repeat on, and echoes the range |
+| `POST` | `/listen-stats` | body from a listening page: `{"mode": "webrtc", "seconds", "received", "lost", "loss_pct", "jitter_ms", "concealed_pct", "concealment_events", "buffer_ms", "rtt_ms"}` for each 5 s of WebRTC, or `{"mode": "llhls", "event": "fallback" \| "waiting", "reason"?}`. Written to the server log as one `listen …` line; answers `204` |
 | `GET` | `/timeline` | `{"enabled": false}`, or `{"enabled": true, "end": 163.5, "edges": [0.0, 1.74, …], "loop": {"start", "end"} or null, "regions": [{"id", "name", "start", "end", "color"}], "markers": [{"id", "name", "pos", "color"}]}` (seconds). `edges[i]` and `edges[i + 1]` bound measure `i + 1`; `color` is `0xaarrggbb`, `0` when none is set. Runs the timeline script on every call |
 
 Errors are JSON `{"detail": "..."}`:

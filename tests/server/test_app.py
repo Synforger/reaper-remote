@@ -390,3 +390,49 @@ def test_loop_rejects_an_empty_or_reversed_range(make_client, raw_config, reaper
     with make_client(raw_config) as c:
         assert c.post("/loop", json=body).status_code == 400
     assert reaper.requests == []
+
+
+# -- listening stats ------------------------------------------------------------
+
+
+def test_listen_stats_are_logged_on_one_line(client, caplog) -> None:
+    caplog.set_level("INFO", logger="reaper_remote")
+    body = {
+        "mode": "webrtc",
+        "seconds": 5.0,
+        "received": 248,
+        "lost": 2,
+        "loss_pct": 0.8,
+        "jitter_ms": 12.5,
+        "concealed_pct": 0.4,
+        "concealment_events": 1,
+        "buffer_ms": 85.0,
+        "rtt_ms": 41.0,
+    }
+    assert client.post("/listen-stats", json=body).status_code == 204
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("listen "))
+    assert line.startswith("listen mode=webrtc seconds=5.0 received=248 lost=2 loss_pct=0.8 ")
+    assert "buffer_ms=85.0 rtt_ms=41.0 from " in line
+
+
+def test_listen_stats_log_a_fallback_with_its_reason(client, caplog) -> None:
+    caplog.set_level("INFO", logger="reaper_remote")
+    body = {"mode": "llhls", "event": "fallback", "reason": "WebRTC dropped"}
+    assert client.post("/listen-stats", json=body).status_code == 204
+    assert any(
+        "listen mode=llhls event=fallback reason='WebRTC dropped'" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"mode": "rtmp"},
+        {"mode": "webrtc", "event": "anything"},
+        {"mode": "llhls", "reason": "x" * 201},
+    ],
+    ids=["unknown-mode", "unknown-event", "long-reason"],
+)
+def test_listen_stats_reject_what_they_do_not_know(client, body) -> None:
+    assert client.post("/listen-stats", json=body).status_code == 422

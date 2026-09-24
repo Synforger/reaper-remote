@@ -13,6 +13,27 @@ Close it. A *ReaScript error* that says a file cannot be read means an action
 in `config.json` points at a script that was moved or deleted; register the
 script again (Setup step 5) and update the command ID.
 
+## Audio is choppy on the phone
+
+While the phone listens over WebRTC, the page writes what it received to the
+server log every 5 seconds:
+
+```
+listen mode=webrtc seconds=5.0 received=248 lost=2 loss_pct=0.8 jitter_ms=12.5 concealed_pct=0.4 concealment_events=1 buffer_ms=85.0 rtt_ms=41.0 from 100.x.y.z
+```
+
+- `lost` / `loss_pct`: packets that never arrived. Each one is a gap the
+  phone has to fill in.
+- `jitter_ms`: how unevenly packets arrive. `buffer_ms` is how long the phone
+  holds audio to smooth that out.
+- `concealed_pct` / `concealment_events`: how much of what was played was
+  made up to cover missing audio — what is heard as a crackle or dropout.
+- `rtt_ms`: the round trip to the phone.
+
+A switch to LL-HLS is logged as `listen mode=llhls event=fallback` with its
+reason, and each stall on LL-HLS as `event=waiting`. Compare the lines from
+around a dropout with those from clean listening.
+
 ## The dot is green but nothing is heard
 
 - The Mac output is `headphones`, so nothing reaches BlackHole. Switch to

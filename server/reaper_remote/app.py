@@ -13,13 +13,14 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.types import Scope
 
 from . import timeline as timeline_reply
@@ -44,6 +45,24 @@ class DeviceRequest(BaseModel):
 class LoopRequest(BaseModel):
     start: float
     end: float
+
+
+class ListenStats(BaseModel):
+    """One report from a listening page: an interval of WebRTC receive counters,
+    or an event (a fall back to LL-HLS, a stall on it)."""
+
+    mode: Literal["webrtc", "llhls"]
+    event: Literal["fallback", "waiting"] | None = None
+    reason: str | None = Field(default=None, max_length=200)
+    seconds: float | None = None
+    received: int | None = None
+    lost: int | None = None
+    loss_pct: float | None = None
+    jitter_ms: float | None = None
+    concealed_pct: float | None = None
+    concealment_events: int | None = None
+    buffer_ms: float | None = None
+    rtt_ms: float | None = None
 
 
 def ui_fingerprint(web_dir: Path) -> str:
@@ -287,6 +306,22 @@ def create_app(
         value = quote(f"{req.start:.6f},{req.end:.6f}", safe="")
         await reaper(f"SET/EXTSTATE/{EXTSTATE_SECTION}/loop/{value};{lc.action};SET/REPEAT/1")
         return {"start": req.start, "end": req.end}
+
+    # -- listening stats ----------------------------------------------------------
+    @app.post("/listen-stats", status_code=204)
+    async def listen_stats(req: ListenStats, request: Request) -> Response:
+        client = request.headers.get("x-forwarded-for") or (
+            request.client.host if request.client else "?"
+        )
+        fields = req.model_dump(exclude_none=True, exclude={"mode", "event", "reason"})
+        parts = [f"mode={req.mode}"]
+        if req.event:
+            parts.append(f"event={req.event}")
+        parts += [f"{k}={v}" for k, v in fields.items()]
+        if req.reason:
+            parts.append(f"reason={req.reason!r}")
+        log.info("listen %s from %s", " ".join(parts), client)
+        return Response(status_code=204)
 
     # -- UI (mounted last so the routes above win) ----------------------------
     # Fixed at start-up: a restart with new UI files changes it, and open pages

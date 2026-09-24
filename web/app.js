@@ -17,6 +17,8 @@ import {
   parseReply,
   peakToPercent,
   previousMeasureStart,
+  receiveInterval,
+  receiveSnapshot,
   secondsToMeasure,
   volumeToSlider,
 } from "./lib.js";
@@ -605,16 +607,21 @@ setInterval(() => {
 // connect, or drops later, the page falls back to Low-Latency HLS (1–2 s
 // behind), which plays wherever the browser has native HLS. Both come from
 // mediamtx through this app's `whep` and `llhls/` routes.
+//
+// While on WebRTC the page reports the receive counters every STATS_MS to the
+// server log (POST listen-stats), and a fall back to LL-HLS with its reason.
 
 const audio = $("audio");
 const WHEP_CONNECT_TIMEOUT_MS = 6000;
 const LLHLS_URL = "llhls/index.m3u8";
+const STATS_MS = 5000;
 const canHls = audio.canPlayType("application/vnd.apple.mpegurl") !== "";
 
 let listening = false;
 let pc = null; // RTCPeerConnection while on WebRTC
 let session = null; // WHEP session URL, for DELETE on stop
 let mode = null; // "webrtc" | "llhls"
+let statsTimer = null;
 
 const LISTEN_OUTPUTS = new Set(["multi", "blackhole"]);
 const TAP_TO_LISTEN = "tap Multi or BlackHole to listen";
@@ -683,6 +690,7 @@ async function startWebRtc(stream) {
       }
     });
   });
+  reportStats(peer);
   // A later drop (network change, the phone locking) falls back to LL-HLS.
   peer.addEventListener("connectionstatechange", () => {
     if (listening && pc === peer && ["failed", "disconnected"].includes(peer.connectionState)) {
@@ -691,7 +699,31 @@ async function startWebRtc(stream) {
   });
 }
 
+function postStats(body) {
+  fetch("listen-stats", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => {}); // a lost report must never disturb listening
+}
+
+function reportStats(peer) {
+  clearInterval(statsTimer);
+  let prev = null;
+  statsTimer = setInterval(async () => {
+    if (pc !== peer) {
+      clearInterval(statsTimer);
+      return;
+    }
+    const cur = receiveSnapshot(await peer.getStats(), performance.now());
+    if (prev) postStats({ mode: "webrtc", ...receiveInterval(prev, cur) });
+    prev = cur;
+  }, STATS_MS);
+}
+
 function closeWebRtc() {
+  clearInterval(statsTimer);
+  statsTimer = null;
   if (session) fetch(session, { method: "DELETE" }).catch(() => {});
   if (pc) pc.close();
   pc = null;
@@ -702,6 +734,7 @@ let llhlsRetried = false;
 
 function startLlHls(reason) {
   closeWebRtc();
+  postStats({ mode: "llhls", event: "fallback", reason });
   llhlsRetried = false;
   if (!canHls) {
     stopListening();
@@ -745,7 +778,11 @@ audio.addEventListener("playing", () => {
   if (!listening) return;
   setListenStatus("live", mode === "webrtc" ? "live over WebRTC" : "live over LL-HLS, 1–2 s behind");
 });
-audio.addEventListener("waiting", () => listening && setListenStatus("buffering", "buffering…"));
+audio.addEventListener("waiting", () => {
+  if (!listening) return;
+  setListenStatus("buffering", "buffering…");
+  if (mode === "llhls") postStats({ mode: "llhls", event: "waiting" });
+});
 audio.addEventListener("error", () => {
   if (!listening || mode !== "llhls") return;
   if (!llhlsRetried) {

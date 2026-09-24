@@ -162,3 +162,61 @@ export function labelStep(count, widthPx, minPx = 28) {
   }
   return 256;
 }
+
+// -- listening stats ----------------------------------------------------------
+//
+// While the phone listens over WebRTC, the page samples the browser's own
+// receive counters and reports each interval, so choppy audio can be told
+// apart: packets lost on the way, or packets arriving unevenly.
+
+// The counters that matter, from an RTCStatsReport (or any iterable of stats).
+export function receiveSnapshot(report, at) {
+  const snap = {
+    at,
+    received: 0,
+    lost: 0,
+    jitter: 0,
+    concealed: 0,
+    samples: 0,
+    events: 0,
+    delay: 0,
+    emitted: 0,
+    rtt: null,
+  };
+  for (const s of report.values ? report.values() : report) {
+    if (s.type === "inbound-rtp" && s.kind === "audio") {
+      snap.received = s.packetsReceived ?? 0;
+      snap.lost = s.packetsLost ?? 0;
+      snap.jitter = s.jitter ?? 0;
+      snap.concealed = s.concealedSamples ?? 0;
+      snap.samples = s.totalSamplesReceived ?? 0;
+      snap.events = s.concealmentEvents ?? 0;
+      snap.delay = s.jitterBufferDelay ?? 0;
+      snap.emitted = s.jitterBufferEmittedCount ?? 0;
+    } else if (s.type === "candidate-pair" && s.nominated && s.currentRoundTripTime != null) {
+      snap.rtt = s.currentRoundTripTime;
+    }
+  }
+  return snap;
+}
+
+// What happened between two snapshots. Jitter and round trip are the latest
+// values; the rest are per interval.
+export function receiveInterval(prev, cur) {
+  const received = cur.received - prev.received;
+  const lost = Math.max(0, cur.lost - prev.lost);
+  const samples = cur.samples - prev.samples;
+  const emitted = cur.emitted - prev.emitted;
+  const round = (x, digits = 1) => Math.round(x * 10 ** digits) / 10 ** digits;
+  return {
+    seconds: round((cur.at - prev.at) / 1000),
+    received,
+    lost,
+    loss_pct: received + lost > 0 ? round((lost / (received + lost)) * 100, 2) : 0,
+    jitter_ms: round(cur.jitter * 1000),
+    concealed_pct: samples > 0 ? round(((cur.concealed - prev.concealed) / samples) * 100, 2) : 0,
+    concealment_events: cur.events - prev.events,
+    buffer_ms: emitted > 0 ? round(((cur.delay - prev.delay) / emitted) * 1000) : null,
+    rtt_ms: cur.rtt == null ? null : round(cur.rtt * 1000),
+  };
+}
