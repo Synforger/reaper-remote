@@ -55,20 +55,39 @@ cp config.example.json config.json
 Fill in the device names (see [Reference](../reference/README.md) for every
 key). `config.json` is git-ignored; nothing machine-specific is committed.
 
-## 5. (Optional) Register the render script
+## 5. (Optional) Register the REAPER scripts
 
-`POST /render` runs a REAPER action. The repository ships that action as a
-ReaScript:
+Three features run a REAPER action that the repository ships as a ReaScript.
+Register each one the same way:
 
 1. REAPER → Actions → Show action list → **New action** → *Load ReaScript*,
-   pick `reaper/reaper-remote-render.lua`.
+   pick the script.
 2. Right-click the new action → *Copy selected action command ID* (it starts with `_RS`).
-3. Put it into `render.action` in `config.json`, and pick a `render.dir`.
+3. Put it into `config.json` under the key below.
 
-The script renders the time selection (or the whole project when there is
-none) of the master mix into `render.dir`, using the project's current render
-format, and restores the project's render settings afterwards. Leave the
-`render` block out to hide the render button.
+| script | key | what it gives the page |
+|---|---|---|
+| `reaper/reaper-remote-timeline.lua` | `timeline.action` | the seek bar: measures, regions, markers and the loop points; drag or tap to jump to a measure, tap a region to jump to its start |
+| `reaper/reaper-remote-loop.lua` | `loop.action` | setting the loop from the seek bar: long-press a region to loop it, or long-press and slide to loop measures |
+| `reaper/reaper-remote-render.lua` | `render.action` (and pick a `render.dir`) | the render button |
+
+The timeline script only reads the project: it publishes where every measure
+starts (from REAPER's tempo map, so tempo and time signature changes are
+followed) and where the loop points are, and adds no undo point. The page runs
+it every few seconds, so the seek bar follows edits.
+
+The loop script moves the loop points only (the play position and the time
+selection stay), turns repeat on, and adds no undo point.
+
+Register the scripts from where they will stay: an action keeps the path it
+was loaded from, and while a script is missing REAPER shows an error dialog
+that blocks every web request until it is closed.
+
+The render script renders the time selection (or the whole project when there
+is none) of the master mix into `render.dir`, using the project's current
+render format, and restores the project's render settings afterwards.
+
+Leave a block out to hide its feature.
 
 ## 6. Configure mediamtx
 

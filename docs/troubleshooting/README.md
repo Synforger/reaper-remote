@@ -7,6 +7,12 @@ REAPER is not running, or its web interface is off or on another port.
 `TRANSPORT` line; if it does not, enable the interface (Setup step 2) or fix
 `reaper_url`.
 
+If it hangs instead of answering, look at REAPER's screen: while a dialog is
+open (a *ReaScript error* among them) REAPER answers no web request at all.
+Close it. A *ReaScript error* that says a file cannot be read means an action
+in `config.json` points at a script that was moved or deleted; register the
+script again (Setup step 5) and update the command ID.
+
 ## The dot is green but nothing is heard
 
 - The Mac output is `headphones`, so nothing reaches BlackHole. Switch to
@@ -64,6 +70,17 @@ picks it up within ten seconds.
 ## The render button is missing
 
 There is no `render` block in `config.json`. See Setup step 5.
+
+## The seek bar is missing, or long presses only seek
+
+The seek bar needs a `timeline` block in `config.json`, and setting the loop
+needs a `loop` block. See Setup step 5.
+
+## The page shows `Timeline: the timeline script left no result`
+
+`timeline.action` is not the command ID of `reaper-remote-timeline.lua`.
+Copy it again from the action list (Actions → the action → *Copy selected
+action command ID*).
 
 ## Render answers 504
 

@@ -1,8 +1,9 @@
 """Load and validate `config.json`.
 
 The file is the single source of truth for every machine-specific value
-(bind address, REAPER URL, audio device names, render directory). The code
-only reads it; nothing here guesses a device name or a path.
+(bind address, REAPER URL, audio device names, render directory, the REAPER
+actions it triggers). The code only reads it; nothing here guesses a device
+name or a path.
 """
 
 from __future__ import annotations
@@ -55,11 +56,23 @@ class RenderConfig:
 
 
 @dataclass(frozen=True)
+class TimelineConfig:
+    action: str
+
+
+@dataclass(frozen=True)
+class LoopConfig:
+    action: str
+
+
+@dataclass(frozen=True)
 class Config:
     reaper_url: str
     stream: StreamConfig
     devices: DeviceConfig
     render: RenderConfig | None
+    timeline: TimelineConfig | None = None
+    loop: LoopConfig | None = None
     media: MediaConfig = field(default_factory=MediaConfig)
     host: str = "127.0.0.1"
     port: int = 8090
@@ -82,7 +95,7 @@ def parse(raw: dict) -> Config:
     top = _take(
         raw,
         "config",
-        {"host", "port", "reaper_url", "stream", "devices", "render", "media"},
+        {"host", "port", "reaper_url", "stream", "devices", "render", "timeline", "loop", "media"},
         {"reaper_url", "stream", "devices"},
     )
 
@@ -108,6 +121,16 @@ def parse(raw: dict) -> Config:
             timeout_s=float(r.get("timeout_s", 600.0)),
         )
 
+    timeline = None
+    if top.get("timeline") is not None:
+        t = _take(top["timeline"], "timeline", {"action"}, {"action"})
+        timeline = TimelineConfig(action=str(t["action"]))
+
+    loop = None
+    if top.get("loop") is not None:
+        lp = _take(top["loop"], "loop", {"action"}, {"action"})
+        loop = LoopConfig(action=str(lp["action"]))
+
     m = _take(top.get("media", {}), "media", {"webrtc", "hls", "path"}, set())
     media = MediaConfig(
         **{k: str(v).rstrip("/") if k != "path" else str(v).strip("/") for k, v in m.items()}
@@ -124,6 +147,8 @@ def parse(raw: dict) -> Config:
             switch_audio_source=devices.get("switch_audio_source", "SwitchAudioSource"),
         ),
         render=render,
+        timeline=timeline,
+        loop=loop,
     )
 
 

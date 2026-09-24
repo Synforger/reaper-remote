@@ -15,5 +15,11 @@
     "action": "<command ID of reaper/reaper-remote-render.lua, starts with _RS>",
     "dir": "~/Music/reaper-remote-renders",
     "timeout_s": 600
+  },
+  "timeline": {
+    "action": "<command ID of reaper/reaper-remote-timeline.lua, starts with _RS>"
+  },
+  "loop": {
+    "action": "<command ID of reaper/reaper-remote-loop.lua, starts with _RS>"
   }
 }

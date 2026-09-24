@@ -23,9 +23,12 @@ Unknown keys are rejected at startup, so a typo fails loudly.
 | `render.action` | (required in `render`) | command ID of `reaper/reaper-remote-render.lua` (`_RS…`) |
 | `render.dir` | (required in `render`) | directory the rendered files go to; `~` is expanded |
 | `render.timeout_s` | `600` | how long to wait for a render to finish |
+| `timeline.action` | (required in `timeline`) | command ID of `reaper/reaper-remote-timeline.lua` (`_RS…`) |
+| `loop.action` | (required in `loop`) | command ID of `reaper/reaper-remote-loop.lua` (`_RS…`) |
 
 A device key that is left out does not get a button. Without a `render` block
-the render button is hidden.
+the render button is hidden; without a `timeline` block the seek bar is, and
+without a `loop` block a long press on it seeks instead of setting the loop.
 
 ## HTTP API
 
@@ -44,16 +47,19 @@ All paths are relative to where the server is mounted.
 | `GET` | `/render` | `{"enabled": true \| false}` |
 | `POST` | `/render` | renders and returns `{"name": "<file>", "url": "renders/<file>"}` once the file has stopped growing |
 | `GET` | `/renders/<file>` | a rendered file |
+| `GET` | `/loop` | `{"enabled": true \| false}` |
+| `POST` | `/loop` | body `{"start": <s>, "end": <s>}` (seconds, `0 <= start < end`); sets the loop points through the loop script, turns repeat on, and echoes the range |
+| `GET` | `/timeline` | `{"enabled": false}`, or `{"enabled": true, "end": 163.5, "edges": [0.0, 1.74, …], "loop": {"start", "end"} or null, "regions": [{"id", "name", "start", "end", "color"}], "markers": [{"id", "name", "pos", "color"}]}` (seconds). `edges[i]` and `edges[i + 1]` bound measure `i + 1`; `color` is `0xaarrggbb`, `0` when none is set. Runs the timeline script on every call |
 
 Errors are JSON `{"detail": "..."}`:
 
 | status | when |
 |---|---|
-| `400` | `POST /device` with an unknown key |
-| `404` | device key or `render` not configured; unknown rendered file |
+| `400` | `POST /device` with an unknown key; `POST /loop` with an empty or reversed range |
+| `404` | device key, `render` or `loop` not configured; unknown rendered file |
 | `409` | `POST /device` to a device that is not connected; `POST /render` while another render is running |
 | `500` | SwitchAudioSource missing or failing |
-| `502` | REAPER's web interface or mediamtx unreachable or erroring |
+| `502` | REAPER's web interface or mediamtx unreachable or erroring; `GET /timeline` when the script left no usable result (wrong `timeline.action`) |
 | `504` | no rendered file appeared within `render.timeout_s` |
 
 There is no authentication in the server itself: it listens on loopback, and

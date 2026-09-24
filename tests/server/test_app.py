@@ -283,3 +283,110 @@ def test_version_route_and_ui_files_are_never_served_stale(client) -> None:
     assert r.headers["cache-control"] == "no-store"
     for path in ("/", "/app.js", "/style.css"):
         assert client.get(path).headers["cache-control"] == "no-cache"
+
+
+# -- timeline ---------------------------------------------------------------
+
+TIMELINE_REPLY = (
+    "EXTSTATE\treaper_remote\ttimeline\t9.000000|0.000000,2.000000,4.000000,6.000000,9.000000"
+    "|4.000000,6.000000\n"
+    "MARKER_LIST\n"
+    "MARKER\tDrop\t1\t4.500000\t0x01ff8000\n"
+    "MARKER_LIST_END\n"
+    "REGION_LIST\n"
+    "REGION\tIntro\\tA\t1\t0.000000\t4.000000\t0\n"
+    "REGION\tHook\t2\t4.000000\t9.000000\n"
+    "REGION_LIST_END\n"
+)
+
+
+def test_timeline_runs_the_script_and_reads_it_back_in_one_request(make_client, raw_config, reaper):
+    raw_config["timeline"] = {"action": "_RS5678"}
+    with make_client(raw_config) as c:
+        reaper.reply = TIMELINE_REPLY
+        r = c.get("/timeline")
+        assert r.status_code == 200, r.text
+        assert r.headers["cache-control"] == "no-store"
+        assert r.json() == {
+            "enabled": True,
+            "end": 9.0,
+            "edges": [0.0, 2.0, 4.0, 6.0, 9.0],
+            "loop": {"start": 4.0, "end": 6.0},
+            "markers": [{"id": 1, "name": "Drop", "pos": 4.5, "color": 0x01FF8000}],
+            "regions": [
+                {"id": 1, "name": "Intro\tA", "start": 0.0, "end": 4.0, "color": 0},
+                {"id": 2, "name": "Hook", "start": 4.0, "end": 9.0, "color": 0},
+            ],
+        }
+        # Cleared before the action runs, so a stale result can never be read.
+        assert reaper.requests == [
+            "/_/SET/EXTSTATE/reaper_remote/timeline/;_RS5678;"
+            "GET/EXTSTATE/reaper_remote/timeline;MARKER;REGION"
+        ]
+
+
+def test_timeline_disabled_without_config(client, reaper) -> None:
+    assert client.get("/timeline").json() == {"enabled": False}
+    assert reaper.requests == []
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["", "garbage", "9.0||0,0", "9.0|0.0|0,0", "x|0.0,1.0|0,0", "9.0|0.0,1.0", "9.0|0.0,1.0|x"],
+    ids=[
+        "script-did-not-run",
+        "no-separator",
+        "no-edges",
+        "one-edge",
+        "bad-number",
+        "no-loop",
+        "bad-loop",
+    ],
+)
+def test_timeline_without_a_usable_result_is_a_502(make_client, raw_config, reaper, state) -> None:
+    raw_config["timeline"] = {"action": "_RS5678"}
+    with make_client(raw_config) as c:
+        reaper.reply = f"EXTSTATE\treaper_remote\ttimeline\t{state}\nMARKER_LIST\nMARKER_LIST_END\n"
+        r = c.get("/timeline")
+        assert r.status_code == 502
+        assert r.json()["detail"]
+
+
+def test_timeline_reports_no_loop_when_the_points_meet(make_client, raw_config, reaper) -> None:
+    raw_config["timeline"] = {"action": "_RS5678"}
+    with make_client(raw_config) as c:
+        reaper.reply = "EXTSTATE\treaper_remote\ttimeline\t9.0|0.0,9.0|3.0,3.0\n"
+        assert c.get("/timeline").json()["loop"] is None
+
+
+# -- loop ---------------------------------------------------------------------
+
+
+def test_loop_sets_the_range_through_the_script_and_turns_repeat_on(
+    make_client, raw_config, reaper
+):
+    raw_config["loop"] = {"action": "_RS9abc"}
+    with make_client(raw_config) as c:
+        assert c.get("/loop").json() == {"enabled": True}
+        r = c.post("/loop", json={"start": 55.652174, "end": 69.565217})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"start": 55.652174, "end": 69.565217}
+        assert reaper.requests == [
+            "/_/SET/EXTSTATE/reaper_remote/loop/55.652174%2C69.565217;_RS9abc;SET/REPEAT/1"
+        ]
+
+
+def test_loop_disabled_without_config(client, reaper) -> None:
+    assert client.get("/loop").json() == {"enabled": False}
+    assert client.post("/loop", json={"start": 0, "end": 1}).status_code == 404
+    assert reaper.requests == []
+
+
+@pytest.mark.parametrize(
+    "body", [{"start": 4, "end": 4}, {"start": 5, "end": 4}, {"start": -1, "end": 2}]
+)
+def test_loop_rejects_an_empty_or_reversed_range(make_client, raw_config, reaper, body) -> None:
+    raw_config["loop"] = {"action": "_RS9abc"}
+    with make_client(raw_config) as c:
+        assert c.post("/loop", json=body).status_code == 400
+    assert reaper.requests == []

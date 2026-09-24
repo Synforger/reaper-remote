@@ -5,7 +5,8 @@
 ## Works today
 
 - Transport: play / pause / stop / go to start / repeat, with the current position
-- Per-track fader (dB), mute and solo, with a peak meter
+- Seek bar in measures, with regions, markers and the loop points: drag or tap to jump to a measure, tap a region to jump to its start, step one measure back or forward, long-press to loop a region or a span of measures
+- Per-track fader (dB, draggable or typed), mute and solo, with a peak meter
 - Live audio of the Mac's output through mediamtx: WebRTC first (well under a second behind), Low-Latency HLS as the fallback; captured only while someone listens, never altered
 - Switching the Mac's system output between three configured devices
 - One-tap render of the time selection (or the whole project), playable in the page

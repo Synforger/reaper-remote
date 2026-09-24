@@ -76,3 +76,89 @@ export function peakToPercent(peakDb) {
   if (!Number.isFinite(peakDb) || peakDb <= DB_MIN) return 0;
   return Math.min(100, ((peakDb - DB_MIN) / -DB_MIN) * 100);
 }
+
+// A typed fader value: "-6", "+3.5", "0", "-inf" (or anything at or below
+// DB_MIN) -> REAPER volume, clamped to DB_MAX. null when it is not a number.
+export function parseDbInput(text) {
+  const s = String(text).trim().toLowerCase().replace(/db$/, "").trim();
+  if (s === "-inf" || s === "inf" || s === "-∞") return 0;
+  if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(s)) return null;
+  return dbToVolume(Math.min(DB_MAX, Number(s)));
+}
+
+// -- timeline -------------------------------------------------------------------
+//
+// `edges` come from GET /timeline: edges[i] and edges[i + 1] (seconds) bound
+// measure i + 1. The seek bar gives every measure the same width, so a
+// position is drawn at its measure index plus the fraction of that measure.
+
+export function measureCount(edges) {
+  return edges.length - 1;
+}
+
+// Seconds -> position in measures from the start (0 = start of measure 1),
+// clamped to the timeline.
+export function secondsToMeasure(edges, seconds) {
+  const n = measureCount(edges);
+  if (!(seconds > edges[0])) return 0;
+  if (seconds >= edges[n]) return n;
+  let lo = 0;
+  let hi = n; // edges[lo] <= seconds < edges[hi]
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (edges[mid] <= seconds) lo = mid;
+    else hi = mid;
+  }
+  return lo + (seconds - edges[lo]) / (edges[lo + 1] - edges[lo]);
+}
+
+// The start (seconds) of measure `number` (1-based), clamped to the timeline.
+export function measureStart(edges, number) {
+  const i = Math.min(measureCount(edges) - 1, Math.max(0, Math.round(number) - 1));
+  return edges[i];
+}
+
+// The measure number (1-based) under a fraction 0..1 of the bar's width.
+export function measureAtFraction(edges, fraction) {
+  const n = measureCount(edges);
+  return Math.min(n, Math.max(1, Math.floor(fraction * n) + 1));
+}
+
+// The span of measures a..b (1-based, either order, both included), in seconds.
+export function measureRange(edges, a, b) {
+  const n = measureCount(edges);
+  const first = Math.min(n, Math.max(1, Math.min(a, b)));
+  const last = Math.min(n, Math.max(1, Math.max(a, b)));
+  return {
+    start: edges[first - 1],
+    end: edges[last],
+    label: first === last ? String(first) : `${first}–${last}`,
+  };
+}
+
+// Where "previous measure" goes, DAW style: back to the start of the current
+// measure, or one further when already (nearly) there.
+export function previousMeasureStart(edges, seconds, slack = 0.05) {
+  const m = secondsToMeasure(edges, seconds);
+  const current = Math.floor(m);
+  const into = m - current;
+  const target = into * (edges[current + 1] - edges[current]) > slack ? current : current - 1;
+  return edges[Math.max(0, target)];
+}
+
+// Where "next measure" goes: the start of the following measure, or the end of
+// the timeline from inside the last one.
+export function nextMeasureStart(edges, seconds) {
+  const n = measureCount(edges);
+  return edges[Math.min(n, Math.floor(secondsToMeasure(edges, seconds)) + 1)];
+}
+
+// Label every `step` measures (1, 1+step, ...) so labels are at least
+// `minPx` apart on a bar `widthPx` wide.
+export function labelStep(count, widthPx, minPx = 28) {
+  const perMeasure = widthPx / Math.max(1, count);
+  for (const step of [1, 2, 4, 8, 16, 32, 64, 128]) {
+    if (perMeasure * step >= minPx) return step;
+  }
+  return 256;
+}

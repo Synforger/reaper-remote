@@ -4,7 +4,9 @@
 
 reaper-remote is a small server that runs on the Mac next to REAPER. Open it
 in a phone browser and you get the transport (play / pause / stop / repeat),
-a fader with mute and solo for every track, a live stream of what the Mac is
+a seek bar laid out in measures with the project's regions (tap to jump,
+long-press to loop), a fader (drag or
+type a value) with mute and solo for every track, a live stream of what the Mac is
 playing, a switch for the Mac's system output, and a one-tap render of the
 time selection.
 
@@ -19,6 +21,8 @@ phone browser ──https──▶ tailscale serve ──▶ reaper-remote (127.
       │                                        ├─ /reaper/_/…  ─▶ REAPER web interface (127.0.0.1:8080)
       │                                        ├─ /device      ─▶ SwitchAudioSource (Mac system output)
       │                                        ├─ /render      ─▶ REAPER action (reaper/reaper-remote-render.lua)
+      │                                        ├─ /timeline    ─▶ REAPER action (reaper/reaper-remote-timeline.lua)
+      │                                        ├─ /loop        ─▶ REAPER action (reaper/reaper-remote-loop.lua)
       │                                        └─ /whep, /llhls/… ─▶ mediamtx (127.0.0.1:8889 / 8888)
       │                                                                 ▲ RTSP (Opus)
       │                                                    reaper-remote publish ◀─ CoreAudio ◀─ BlackHole 2ch ◀─ Mac output

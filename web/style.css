@@ -8,6 +8,8 @@
   --on: #3ecf8e;
   --warn: #ffb454;
   --danger: #ff6b6b;
+  --region-a: #2b3a4f;
+  --region-b: #343049;
 }
 
 * { box-sizing: border-box; }
@@ -62,8 +64,26 @@ button.toggle.on { border-color: var(--on); color: var(--on); }
 button.wide { font-size: 14px; }
 button:disabled { opacity: 0.5; }
 
-.position {
+/* Where playback is: the region name over the position. */
+.where {
   margin-left: auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.15;
+}
+
+.section {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.position {
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
@@ -158,6 +178,22 @@ button.icon { min-width: 40px; padding: 0; font-size: 17px; }
   color: var(--muted);
 }
 
+.track .db { cursor: text; }
+
+.track .db-input {
+  width: 100%;
+  padding: 1px 2px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* below 16 px iOS zooms the page into the field */
+  text-align: right;
+}
+
+.track .db-input.invalid { border-color: var(--danger); }
+
 .track .meter {
   position: absolute;
   left: 0;
@@ -169,6 +205,134 @@ button.icon { min-width: 40px; padding: 0; font-size: 17px; }
 }
 
 .track .meter.hot { background: var(--danger); }
+
+/* Seek bar: regions on top, measure numbers below, the playhead across both. */
+.transport button { min-width: 36px; padding: 0 6px; }
+button svg { display: block; margin: auto; }
+
+.timeline {
+  position: relative;
+  flex: 1;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  touch-action: none; /* a drag scrubs measures instead of scrolling the page */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none; /* a long press sets the loop, not a context menu */
+  cursor: pointer;
+}
+
+.regions {
+  position: absolute;
+  inset: 0 0 50% 0;
+  overflow: hidden;
+  border-radius: 7px 7px 0 0;
+}
+
+.region {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 0 3px;
+  border-right: 1px solid var(--bg);
+  font-size: 11px;
+  line-height: 23px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  color: var(--text);
+}
+
+/* A name that would not fit is left out; the block keeps its colour. */
+.region.narrow { color: transparent; }
+
+.marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--warn);
+}
+
+.ruler {
+  position: absolute;
+  inset: 50% 0 0 0;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding-left: 2px;
+  border-left: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 23px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+/* The loop points: dim while repeat is off, lit while it is on. */
+.loop,
+.range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.loop {
+  border-left: 2px solid var(--muted);
+  border-right: 2px solid var(--muted);
+  background: rgba(139, 146, 156, 0.15);
+}
+
+.loop.on {
+  border-color: var(--on);
+  background: rgba(62, 207, 142, 0.18);
+}
+
+/* The loop being picked by a long press. */
+.range {
+  border-left: 2px solid var(--accent);
+  border-right: 2px solid var(--accent);
+  background: rgba(79, 163, 255, 0.25);
+}
+
+.playhead,
+.cue {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  pointer-events: none;
+}
+
+.playhead { background: var(--on); }
+.cue { background: var(--accent); }
+
+.bubble {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  max-width: 60vw;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #000;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 1;
+}
 
 #render-audio { width: 100%; height: 32px; }
 
@@ -184,4 +348,6 @@ button.icon { min-width: 40px; padding: 0; font-size: 17px; }
   button { height: 28px; }
   .segmented button { height: 26px; }
   .track { font-size: 13px; }
+  .timeline { height: 40px; }
+  .region, .tick { line-height: 19px; }
 }

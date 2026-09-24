@@ -1,4 +1,4 @@
-"""HTTP surface: REAPER proxy, output device, render, the UI, and a thin
+"""HTTP surface: REAPER proxy, output device, render, timeline, loop, the UI, and a thin
 same-origin relay to mediamtx for live audio (WHEP and LL-HLS).
 
 Every path is relative to wherever the app is mounted, so the same process
@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.types import Scope
 
+from . import timeline as timeline_reply
 from .config import DEVICE_KEYS, Config
 
 log = logging.getLogger("reaper_remote")
@@ -38,6 +39,11 @@ EXTSTATE_SECTION = "reaper_remote"
 
 class DeviceRequest(BaseModel):
     device: str
+
+
+class LoopRequest(BaseModel):
+    start: float
+    end: float
 
 
 def ui_fingerprint(web_dir: Path) -> str:
@@ -249,6 +255,38 @@ def create_app(
         if path.parent != rc.dir.resolve() or not path.is_file():
             raise HTTPException(404)
         return FileResponse(path)
+
+    # -- timeline ---------------------------------------------------------------
+    @app.get("/timeline")
+    async def timeline() -> JSONResponse:
+        tc = cfg.timeline
+        if tc is None:
+            return JSONResponse({"enabled": False}, headers={"Cache-Control": "no-store"})
+        key = f"{EXTSTATE_SECTION}/{timeline_reply.EXTSTATE_KEY}"
+        # Clear first, so a script that did not run reads as empty, not as the last result.
+        reply = await reaper(f"SET/EXTSTATE/{key}/;{tc.action};GET/EXTSTATE/{key};MARKER;REGION")
+        try:
+            data = timeline_reply.parse(reply, EXTSTATE_SECTION)
+        except timeline_reply.TimelineError as e:
+            raise HTTPException(502, str(e)) from e
+        return JSONResponse({"enabled": True, **data}, headers={"Cache-Control": "no-store"})
+
+    # -- loop -------------------------------------------------------------------
+    @app.get("/loop")
+    async def loop_enabled() -> dict:
+        return {"enabled": cfg.loop is not None}
+
+    @app.post("/loop")
+    async def set_loop(req: LoopRequest) -> dict:
+        lc = cfg.loop
+        if lc is None:
+            raise HTTPException(404, "loop is not configured")
+        if not (0 <= req.start < req.end):
+            raise HTTPException(400, "loop needs 0 <= start < end")
+        # The ReaScript reads the range from this ExtState; repeat goes on with it.
+        value = quote(f"{req.start:.6f},{req.end:.6f}", safe="")
+        await reaper(f"SET/EXTSTATE/{EXTSTATE_SECTION}/loop/{value};{lc.action};SET/REPEAT/1")
+        return {"start": req.start, "end": req.end}
 
     # -- UI (mounted last so the routes above win) ----------------------------
     # Fixed at start-up: a restart with new UI files changes it, and open pages

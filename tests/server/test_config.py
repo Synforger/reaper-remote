@@ -88,3 +88,19 @@ def test_media_can_be_pointed_elsewhere_and_rejects_typos() -> None:
     assert (cfg.media.webrtc, cfg.media.path) == ("http://127.0.0.1:18889", "mix")
     with pytest.raises(ConfigError, match="unknown key"):
         parse(minimal() | {"media": {"whep": "x"}})
+
+
+def test_timeline_is_optional_and_needs_an_action() -> None:
+    assert parse(minimal()).timeline is None
+    assert parse(minimal() | {"timeline": {"action": "_RSabc"}}).timeline.action == "_RSabc"
+    with pytest.raises(ConfigError, match="missing key"):
+        parse(minimal() | {"timeline": {}})
+    with pytest.raises(ConfigError, match="unknown key"):
+        parse(minimal() | {"timeline": {"action": "_RSabc", "every": 5}})
+
+
+def test_loop_is_optional_and_needs_an_action() -> None:
+    assert parse(minimal()).loop is None
+    assert parse(minimal() | {"loop": {"action": "_RSdef"}}).loop.action == "_RSdef"
+    with pytest.raises(ConfigError, match="missing key"):
+        parse(minimal() | {"loop": {}})

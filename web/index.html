@@ -9,18 +9,35 @@
 </head>
 <body>
   <section class="row transport">
-    <button id="btn-start" title="Go to start" aria-label="Go to start">⏮</button>
-    <button id="btn-play" title="Play / pause" aria-label="Play / pause">▶</button>
-    <button id="btn-stop" title="Stop" aria-label="Stop">■</button>
-    <button id="btn-repeat" class="toggle" title="Repeat" aria-label="Repeat">⟲</button>
-    <span id="position" class="position">--</span>
+    <button id="btn-start" title="Go to start" aria-label="Go to start" data-icon="start"></button>
+    <button id="btn-prev-measure" title="Previous measure" aria-label="Previous measure" data-icon="prevMeasure" hidden></button>
+    <button id="btn-play" title="Play / pause" aria-label="Play / pause" data-icon="play"></button>
+    <button id="btn-next-measure" title="Next measure" aria-label="Next measure" data-icon="nextMeasure" hidden></button>
+    <button id="btn-stop" title="Stop" aria-label="Stop" data-icon="stop"></button>
+    <button id="btn-repeat" class="toggle" title="Repeat" aria-label="Repeat" data-icon="repeat"></button>
+    <span class="where">
+      <span id="section" class="section"></span>
+      <span id="position" class="position">--</span>
+    </span>
+  </section>
+
+  <section class="row seek" id="seek" hidden>
+    <div id="timeline" class="timeline" role="slider" aria-label="Position in measures">
+      <div id="regions" class="regions"></div>
+      <div id="ruler" class="ruler"></div>
+      <div id="loop" class="loop" hidden></div>
+      <div id="range" class="range" hidden></div>
+      <div id="cue" class="cue" hidden></div>
+      <div id="playhead" class="playhead"></div>
+      <div id="bubble" class="bubble" hidden></div>
+    </div>
   </section>
 
   <section class="row controls">
     <span id="listen-dot" class="dot" data-state="off" role="status" title="Phone audio: off"></span>
     <audio id="audio" preload="none"></audio>
     <div class="segmented" id="devices" hidden title="Mac output"></div>
-    <button id="btn-render" class="icon" hidden title="Render the time selection" aria-label="Render">⤓</button>
+    <button id="btn-render" class="icon" hidden title="Render the time selection" aria-label="Render" data-icon="render"></button>
   </section>
 
   <section class="tracks" id="tracks"></section>

@@ -45,6 +45,7 @@ tasks:
       - uv run ruff format --check server tests/server
       - node --check web/app.js
       - node --check web/lib.js
+      - node --check web/icons.js
 
   test:unit:
     desc: Run the server (pytest) and UI helper (node --test) unit tests

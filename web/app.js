@@ -7,10 +7,22 @@ import {
   PLAYSTATE,
   dbToVolume,
   formatDb,
+  labelStep,
+  measureAtFraction,
+  measureCount,
+  measureRange,
+  measureStart,
+  nextMeasureStart,
+  parseDbInput,
   parseReply,
   peakToPercent,
+  previousMeasureStart,
+  secondsToMeasure,
   volumeToSlider,
 } from "./lib.js";
+import { drawIcons, setIcon } from "./icons.js";
+
+drawIcons();
 
 // REAPER action IDs (main section).
 const ACTION = { PLAY: 1007, PAUSE: 1008, STOP: 1016, GO_TO_START: 40042 };
@@ -53,12 +65,18 @@ async function reaper(commands) {
 
 let playstate = PLAYSTATE.STOPPED;
 let repeat = false;
+// The last reported position and when it arrived, so the playhead can move
+// smoothly between polls.
+let reported = { seconds: 0, at: 0, playing: false };
 
 function renderTransport(t) {
   playstate = t.playstate;
   repeat = t.repeat;
   const playing = t.playstate === PLAYSTATE.PLAYING || t.playstate === PLAYSTATE.RECORDING;
-  $("btn-play").textContent = playing ? "⏸" : "▶";
+  reported = { seconds: t.seconds, at: performance.now(), playing };
+  $("loop").classList.toggle("on", t.repeat);
+  const icon = playing ? "pause" : "play";
+  if ($("btn-play").dataset.icon !== icon) setIcon($("btn-play"), icon);
   $("btn-repeat").classList.toggle("on", t.repeat);
   const pos = $("position");
   // With a beats-based timeline both strings are identical; show it once.
@@ -82,6 +100,298 @@ async function send(commands) {
     showError(`REAPER: ${e.message}`);
   }
 }
+
+// -- seek bar -----------------------------------------------------------------
+//
+// Measures laid out at equal width, regions above them, the playhead on top.
+// The region under the playhead is named over the position readout.
+// Drag (or tap) anywhere to pick a measure: a bubble names it while the finger
+// is down and the jump happens once, on release, so playback does not stutter.
+// A tap on a region (or next to a marker) jumps to where it starts, and a long
+// press sets the loop (see "gestures" below). The loop points show as a band.
+// The layout comes from GET /timeline, which needs
+// reaper/reaper-remote-timeline.lua; without it the row stays hidden.
+
+const TIMELINE_REFRESH_MS = 5000;
+const DRAG_THRESHOLD_PX = 6;
+const MARKER_HIT_PX = 12;
+// Extrapolate the playhead at most this far past the last poll.
+const PLAYHEAD_LEAD_S = 1;
+
+let timeline = null; // { edges, loop, regions, markers }
+let timelineKey = "";
+let seekDrag = null; // { startX, moved, target } while a finger is down
+
+function measureX(measure) {
+  return `${(measure / measureCount(timeline.edges)) * 100}%`;
+}
+
+function secondsX(seconds) {
+  return measureX(secondsToMeasure(timeline.edges, seconds));
+}
+
+function regionColor(color, i) {
+  // REAPER reports custom colours as 0xaarrggbb and 0 when none is set.
+  if (color) return `#${(color & 0xffffff).toString(16).padStart(6, "0")}`;
+  return i % 2 ? "var(--region-b)" : "var(--region-a)";
+}
+
+function renderTimeline() {
+  const edges = timeline.edges;
+  const count = measureCount(edges);
+
+  const regions = $("regions");
+  regions.replaceChildren(
+    ...timeline.regions.map((r, i) => {
+      const el = document.createElement("div");
+      el.className = "region";
+      el.style.left = secondsX(r.start);
+      el.style.width = `calc(${secondsX(r.end)} - ${secondsX(r.start)})`;
+      el.style.background = regionColor(r.color, i);
+      el.textContent = r.name;
+      el.title = r.name;
+      return el;
+    }),
+    ...timeline.markers.map((m) => {
+      const el = document.createElement("div");
+      el.className = "marker";
+      el.style.left = secondsX(m.pos);
+      el.title = m.name;
+      return el;
+    }),
+  );
+
+  // A name that does not fit whole is left out rather than cut; only after
+  // layout do the blocks have a width to compare against.
+  for (const el of regions.querySelectorAll(".region")) {
+    el.classList.remove("narrow");
+    el.classList.toggle("narrow", el.scrollWidth > el.clientWidth);
+  }
+
+  const ruler = $("ruler");
+  const step = labelStep(count, ruler.clientWidth);
+  const ticks = [];
+  for (let m = 1; m <= count; m += step) {
+    const tick = document.createElement("span");
+    tick.className = "tick";
+    tick.style.left = measureX(m - 1);
+    tick.textContent = String(m);
+    ticks.push(tick);
+  }
+  ruler.replaceChildren(...ticks);
+  $("timeline").setAttribute("aria-valuemax", String(count));
+}
+
+async function loadTimeline() {
+  let data;
+  try {
+    data = await (await request("timeline")).json();
+  } catch (e) {
+    showError(`Timeline: ${e.message}`);
+    return;
+  }
+  for (const id of ["seek", "btn-prev-measure", "btn-next-measure"]) $(id).hidden = !data.enabled;
+  if (!data.enabled) {
+    timeline = null;
+    $("section").textContent = "";
+    return;
+  }
+  // Rebuild only when the layout changed; the playhead is drawn separately.
+  const key = JSON.stringify([data.edges, data.loop, data.regions, data.markers]);
+  timeline = { edges: data.edges, loop: data.loop, regions: data.regions, markers: data.markers };
+  if (key !== timelineKey && !seekDrag) {
+    timelineKey = key;
+    renderTimeline();
+    renderLoop();
+  }
+}
+
+function drawPlayhead() {
+  if (timeline) {
+    const seconds = currentSeconds();
+    const measure = secondsToMeasure(timeline.edges, seconds);
+    $("playhead").style.left = measureX(measure);
+    const region = timeline.regions.find((r) => r.start <= seconds && seconds < r.end);
+    const name = region ? region.name : "";
+    if ($("section").textContent !== name) $("section").textContent = name;
+    $("timeline").setAttribute("aria-valuenow", String(Math.floor(measure) + 1));
+  }
+  requestAnimationFrame(drawPlayhead);
+}
+
+// -- gestures on the bar --
+//
+// A short press (or a press that starts moving) seeks. Holding still for
+// LONG_PRESS_MS instead picks a loop: let go on a region to loop that region,
+// or keep holding and slide to cover measures from where the finger went down.
+// Either way nothing reaches REAPER until the finger lifts.
+
+const LONG_PRESS_MS = 450;
+let loopSettable = false; // GET /loop: the server can set the loop points
+
+function regionAt(x) {
+  const width = $("timeline").clientWidth;
+  const xOf = (s) => (secondsToMeasure(timeline.edges, s) / measureCount(timeline.edges)) * width;
+  const marker = timeline.markers.find((m) => Math.abs(xOf(m.pos) - x) <= MARKER_HIT_PX);
+  const region = timeline.regions.find((r) => xOf(r.start) <= x && x < xOf(r.end));
+  return { marker, region };
+}
+
+function measureUnder(x) {
+  return measureAtFraction(timeline.edges, Math.min(1, Math.max(0, x / $("timeline").clientWidth)));
+}
+
+// What a short press at `x` (px from the bar's left edge) aims at: a marker or
+// a region's start on the region lane, else the measure under the finger.
+function seekTarget(x, onRegions) {
+  if (onRegions) {
+    const { marker, region } = regionAt(x);
+    if (marker) return { seconds: marker.pos, label: marker.name || `Marker ${marker.id}` };
+    if (region) return { seconds: region.start, label: region.name || `Region ${region.id}` };
+  }
+  const number = measureUnder(x);
+  return { seconds: measureStart(timeline.edges, number), label: String(number) };
+}
+
+// What a long press aims at: the region under the finger on the region lane,
+// else the measures from `anchor` to the one under the finger.
+function loopTarget(x, onRegions, anchor) {
+  if (onRegions && anchor === null) {
+    const { region } = regionAt(x);
+    if (region) {
+      return { loop: true, start: region.start, end: region.end, label: `Loop ${region.name}` };
+    }
+  }
+  const r = measureRange(timeline.edges, anchor ?? measureUnder(x), measureUnder(x));
+  return { loop: true, start: r.start, end: r.end, label: `Loop ${r.label}` };
+}
+
+function showCue(target) {
+  const bubble = $("bubble");
+  bubble.textContent = target.label;
+  if (target.loop) {
+    const range = $("range");
+    range.style.left = secondsX(target.start);
+    range.style.width = `calc(${secondsX(target.end)} - ${secondsX(target.start)})`;
+    range.hidden = false;
+    $("cue").hidden = true;
+    bubble.style.left = `calc((${secondsX(target.start)} + ${secondsX(target.end)}) / 2)`;
+  } else {
+    $("cue").style.left = secondsX(target.seconds);
+    $("cue").hidden = false;
+    $("range").hidden = true;
+    bubble.style.left = secondsX(target.seconds);
+  }
+  bubble.hidden = false;
+}
+
+function hideCue() {
+  $("cue").hidden = true;
+  $("range").hidden = true;
+  $("bubble").hidden = true;
+}
+
+const timelineEl = $("timeline");
+
+timelineEl.addEventListener("pointerdown", (e) => {
+  if (!timeline) return;
+  timelineEl.setPointerCapture(e.pointerId);
+  const x = e.clientX - timelineEl.getBoundingClientRect().left;
+  const onRegions = $("regions").contains(e.target);
+  const drag = { startX: x, onRegions, moved: false, anchor: null, timer: null };
+  drag.target = seekTarget(x, onRegions);
+  if (loopSettable) {
+    drag.timer = setTimeout(() => {
+      drag.timer = null;
+      drag.target = loopTarget(x, onRegions, null);
+      showCue(drag.target);
+    }, LONG_PRESS_MS);
+  }
+  seekDrag = drag;
+  showCue(drag.target);
+});
+
+timelineEl.addEventListener("pointermove", (e) => {
+  const drag = seekDrag;
+  if (!drag) return;
+  const x = e.clientX - timelineEl.getBoundingClientRect().left;
+  if (!drag.moved && Math.abs(x - drag.startX) < DRAG_THRESHOLD_PX) return;
+  drag.moved = true;
+  if (drag.target.loop) {
+    // Sliding after the long press: measures from where the finger went down.
+    drag.anchor ??= measureUnder(drag.startX);
+    drag.target = loopTarget(x, drag.onRegions, drag.anchor);
+  } else {
+    // Moving before the long press: a scrub, wherever it started.
+    clearTimeout(drag.timer);
+    drag.timer = null;
+    drag.target = seekTarget(x, false);
+  }
+  showCue(drag.target);
+});
+
+const endSeek = (commit) => {
+  const drag = seekDrag;
+  if (!drag) return;
+  clearTimeout(drag.timer);
+  seekDrag = null;
+  hideCue();
+  if (!commit) return;
+  if (drag.target.loop) setLoop(drag.target.start, drag.target.end);
+  else seekTo(drag.target.seconds);
+};
+timelineEl.addEventListener("pointerup", () => endSeek(true));
+timelineEl.addEventListener("pointercancel", () => endSeek(false));
+
+async function setLoop(start, end) {
+  try {
+    await request("loop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start, end }),
+    });
+    await Promise.all([loadTimeline(), poll()]);
+  } catch (e) {
+    showError(`Loop: ${e.message}`);
+  }
+}
+
+// The loop points as a band on the bar, lit while repeat is on.
+function renderLoop() {
+  const band = $("loop");
+  const loop = timeline?.loop;
+  band.hidden = !loop;
+  if (!loop) return;
+  band.style.left = secondsX(loop.start);
+  band.style.width = `calc(${secondsX(loop.end)} - ${secondsX(loop.start)})`;
+}
+
+function seekTo(seconds) {
+  // Show the jump right away instead of waiting for the next poll.
+  reported = { ...reported, seconds, at: performance.now() };
+  send(`SET/POS/${seconds.toFixed(6)}`);
+}
+
+// The position now: the last report, carried forward while playing.
+function currentSeconds() {
+  return reported.playing
+    ? reported.seconds + Math.min(PLAYHEAD_LEAD_S, (performance.now() - reported.at) / 1000)
+    : reported.seconds;
+}
+
+$("btn-prev-measure").addEventListener("click", () => {
+  if (timeline) seekTo(previousMeasureStart(timeline.edges, currentSeconds()));
+});
+$("btn-next-measure").addEventListener("click", () => {
+  if (timeline) seekTo(nextMeasureStart(timeline.edges, currentSeconds()));
+});
+
+// Labels thin out or fill in as the bar changes width (rotation, host resize).
+new ResizeObserver(() => timeline && renderTimeline()).observe(timelineEl);
+
+setInterval(() => {
+  if (document.visibilityState === "visible") loadTimeline();
+}, TIMELINE_REFRESH_MS);
 
 // -- tracks -------------------------------------------------------------------
 
@@ -113,8 +423,12 @@ function trackRow(track) {
   slider.step = "0.5";
   slider.setAttribute("aria-label", "Volume (dB)");
 
+  // The dB readout doubles as a text field: tap it, type "-6", "+3" or "-inf".
   const db = document.createElement("span");
   db.className = "db";
+  db.setAttribute("role", "button");
+  db.title = "Type a value in dB";
+  db.addEventListener("click", () => editDb(track.index, db, slider));
 
   const meter = document.createElement("div");
   meter.className = "meter";
@@ -150,6 +464,52 @@ function trackRow(track) {
 
   root.append(name, mute, solo, slider, db, meter);
   return { root, name, slider, db, mute, solo, meter };
+}
+
+function editDb(index, db, slider) {
+  if (dragging.has(index)) return;
+  dragging.add(index); // polling leaves the row alone while the value is typed
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "db-input";
+  input.value = db.textContent;
+  input.enterKeyHint = "done";
+  input.autocomplete = "off";
+  input.setAttribute("aria-label", "Volume (dB)");
+  db.replaceChildren(input);
+  input.focus();
+  input.select();
+
+  const before = db.textContent;
+  let done = false;
+  const close = (text) => {
+    done = true;
+    dragging.delete(index);
+    db.textContent = text;
+  };
+  // Enter keeps an invalid value open and marks it; leaving the field (a tap
+  // elsewhere, the keyboard closed) drops it instead, so the field never traps
+  // the finger.
+  const commit = (keepOpenIfInvalid) => {
+    if (done) return;
+    const volume = parseDbInput(input.value);
+    if (volume === null) {
+      if (keepOpenIfInvalid) input.classList.add("invalid");
+      else close(before);
+      return;
+    }
+    slider.value = String(volumeToSlider(volume));
+    close(formatDb(volume));
+    reaper(`SET/TRACK/${index}/VOL/${volume.toFixed(6)}`)
+      .then(poll)
+      .catch((e) => showError(`REAPER: ${e.message}`));
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") commit(true);
+    else if (e.key === "Escape" && !done) close(before);
+  });
+  input.addEventListener("input", () => input.classList.remove("invalid"));
+  input.addEventListener("blur", () => commit(false));
 }
 
 function renderTracks(tracks) {
@@ -223,6 +583,7 @@ function stopPolling() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     startPolling();
+    loadTimeline();
     loadDevices().catch((e) => showError(`Output: ${e.message}`));
   } else stopPolling();
 });
@@ -502,7 +863,7 @@ $("btn-render").addEventListener("click", async () => {
   } catch (e) {
     showError(`Render: ${e.message}`);
   } finally {
-    btn.textContent = "⤓";
+    setIcon(btn, "render");
     btn.disabled = false;
   }
 });
@@ -542,6 +903,13 @@ document.addEventListener("visibilitychange", () => {
 async function boot() {
   checkVersion();
   startPolling();
+  loadTimeline();
+  requestAnimationFrame(drawPlayhead);
+  // Setting the loop is optional too: without it a long press stays a seek.
+  request("loop")
+    .then((r) => r.json())
+    .then((d) => (loopSettable = d.enabled))
+    .catch(() => (loopSettable = false));
   try {
     await loadDevices();
   } catch (e) {

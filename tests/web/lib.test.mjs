@@ -5,8 +5,17 @@ import {
   DB_MIN,
   dbToVolume,
   formatDb,
+  labelStep,
+  measureAtFraction,
+  measureCount,
+  measureRange,
+  measureStart,
+  nextMeasureStart,
+  parseDbInput,
   parseReply,
   peakToPercent,
+  previousMeasureStart,
+  secondsToMeasure,
   volumeToDb,
   volumeToSlider,
 } from "../../web/lib.js";
@@ -68,4 +77,64 @@ test("peakToPercent", () => {
   assert.equal(peakToPercent(0), 100);
   assert.equal(peakToPercent(6), 100);
   assert.equal(peakToPercent(-30), 50);
+});
+
+test("parseDbInput reads typed dB values", () => {
+  assert.equal(parseDbInput("0"), 1);
+  assert.ok(Math.abs(parseDbInput("-6") - dbToVolume(-6)) < 1e-12);
+  assert.ok(Math.abs(parseDbInput("+3.5 dB") - dbToVolume(3.5)) < 1e-12);
+  assert.ok(Math.abs(parseDbInput(".5") - dbToVolume(0.5)) < 1e-12);
+  assert.equal(parseDbInput("-inf"), 0);
+  assert.equal(parseDbInput("-90"), 0); // at or below the fader floor is silence
+  assert.equal(parseDbInput("40"), dbToVolume(12)); // clamped to the fader top
+  for (const bad of ["", "abc", "--3", "1e3", "3-"]) assert.equal(parseDbInput(bad), null, bad);
+});
+
+// Four measures; the last one is slower (3 s instead of 2 s).
+const EDGES = [0, 2, 4, 6, 9];
+
+test("secondsToMeasure maps through uneven measures and clamps", () => {
+  assert.equal(measureCount(EDGES), 4);
+  assert.equal(secondsToMeasure(EDGES, -1), 0);
+  assert.equal(secondsToMeasure(EDGES, 0), 0);
+  assert.equal(secondsToMeasure(EDGES, 3), 1.5);
+  assert.equal(secondsToMeasure(EDGES, 7.5), 3.5);
+  assert.equal(secondsToMeasure(EDGES, 9), 4);
+  assert.equal(secondsToMeasure(EDGES, 99), 4);
+});
+
+test("measureStart and measureAtFraction pick whole measures", () => {
+  assert.equal(measureStart(EDGES, 1), 0);
+  assert.equal(measureStart(EDGES, 4), 6);
+  assert.equal(measureStart(EDGES, 9), 6); // past the end: the last measure
+  assert.equal(measureAtFraction(EDGES, 0), 1);
+  assert.equal(measureAtFraction(EDGES, 0.26), 2);
+  assert.equal(measureAtFraction(EDGES, 1), 4);
+});
+
+test("previous measure goes to the current start first, DAW style", () => {
+  assert.equal(previousMeasureStart(EDGES, 5), 4); // mid measure 3 -> its start
+  assert.equal(previousMeasureStart(EDGES, 4), 2); // at its start -> measure 2
+  assert.equal(previousMeasureStart(EDGES, 4.02), 2); // within the slack counts as at the start
+  assert.equal(previousMeasureStart(EDGES, 0), 0);
+});
+
+test("next measure never moves backwards", () => {
+  assert.equal(nextMeasureStart(EDGES, 0), 2);
+  assert.equal(nextMeasureStart(EDGES, 5.9), 6);
+  assert.equal(nextMeasureStart(EDGES, 7), 9); // inside the last measure -> the end
+  assert.equal(nextMeasureStart(EDGES, 9), 9);
+});
+
+test("labelStep keeps labels apart", () => {
+  assert.equal(labelStep(8, 320), 1); // 40 px per measure
+  assert.equal(labelStep(94, 300), 16); // about 3 px per measure
+  assert.equal(labelStep(4000, 100), 256);
+});
+
+test("measureRange spans whole measures in either direction", () => {
+  assert.deepEqual(measureRange(EDGES, 2, 3), { start: 2, end: 6, label: "2–3" });
+  assert.deepEqual(measureRange(EDGES, 3, 2), { start: 2, end: 6, label: "2–3" });
+  assert.deepEqual(measureRange(EDGES, 4, 4), { start: 6, end: 9, label: "4" });
+  assert.deepEqual(measureRange(EDGES, 0, 99), { start: 0, end: 9, label: "1–4" });
 });
