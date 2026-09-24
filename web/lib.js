@@ -179,6 +179,7 @@ export function receiveSnapshot(report, at) {
     concealed: 0,
     samples: 0,
     events: 0,
+    discarded: 0,
     delay: 0,
     emitted: 0,
     rtt: null,
@@ -191,6 +192,7 @@ export function receiveSnapshot(report, at) {
       snap.concealed = s.concealedSamples ?? 0;
       snap.samples = s.totalSamplesReceived ?? 0;
       snap.events = s.concealmentEvents ?? 0;
+      snap.discarded = s.packetsDiscarded ?? 0;
       snap.delay = s.jitterBufferDelay ?? 0;
       snap.emitted = s.jitterBufferEmittedCount ?? 0;
     } else if (s.type === "candidate-pair" && s.nominated && s.currentRoundTripTime != null) {
@@ -213,6 +215,8 @@ export function receiveInterval(prev, cur) {
     received,
     lost,
     loss_pct: received + lost > 0 ? round((lost / (received + lost)) * 100, 2) : 0,
+    // Arrived, but too late for the jitter buffer: late rather than lost.
+    discarded: cur.discarded - prev.discarded,
     jitter_ms: round(cur.jitter * 1000),
     concealed_pct: samples > 0 ? round(((cur.concealed - prev.concealed) / samples) * 100, 2) : 0,
     concealment_events: cur.events - prev.events,

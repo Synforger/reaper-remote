@@ -14,7 +14,12 @@ from .config import load
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
+    # Timestamped, so a report of choppy audio can be matched to its lines.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s:     %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     args = sys.argv[1:]
     cfg = load()
     if args[:1] == ["publish"]:

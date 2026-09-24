@@ -8,7 +8,7 @@ import pytest
 from conftest import FakeDevice
 
 from reaper_remote.config import parse
-from reaper_remote.publish import default_url, publish, publish_args
+from reaper_remote.publish import default_url, publish, publish_args, wav_header
 
 # -- proxy ------------------------------------------------------------------
 
@@ -106,7 +106,11 @@ def test_device_tool_failure_is_surfaced(client) -> None:
 def test_publisher_encodes_the_capture_untouched(raw_config) -> None:
     args = publish_args(parse(raw_config), 48000, "rtsp://127.0.0.1:8554/reaper")
     i = args.index("-i")
-    assert args[i - 6 : i + 2] == ["-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "pipe:0"]
+    # WAV read one 20 ms block (960 frames x 2 ch x 4 bytes) per packet: raw f32le
+    # would be read 85 ms at a time and leave as bursts of four Opus packets.
+    assert args[i - 6 : i + 2] == [
+        "-f", "wav", "-ignore_length", "1", "-max_size", "7680", "-i", "pipe:0",
+    ]  # fmt: skip
     # The owner's rule: the sound is never altered. No filters, no gain,
     # no resampling or channel changes after the input.
     after = args[i + 2 :]
@@ -119,10 +123,22 @@ def test_publisher_encodes_the_capture_untouched(raw_config) -> None:
 
 def test_publisher_pipes_pcm_to_ffmpeg_and_releases_the_device(raw_config, tools, device):
     assert publish(parse(raw_config), "rtsp://x/reaper", open_stream=device.open) == 0
-    assert tools["pcmfile"].read_bytes() == FakeDevice.BLOCK * (8192 // len(FakeDevice.BLOCK))
-    args = tools["argsfile"].read_text().split()
-    assert args[args.index("-ar") + 1] == "48000"  # the device's own rate
+    sent = tools["pcmfile"].read_bytes()
+    header = wav_header(48000)  # the device's own rate
+    assert sent[: len(header)] == header
+    body = sent[len(header) :]
+    assert body == (FakeDevice.BLOCK * (8192 // len(FakeDevice.BLOCK) + 1))[: len(body)]
     assert device.running == 0
+
+
+def test_wav_header_describes_the_capture_as_an_endless_float_stream() -> None:
+    import struct
+
+    h = wav_header(48000)
+    assert (h[:4], h[8:16], h[36:40]) == (b"RIFF", b"WAVEfmt ", b"data")
+    fmt, channels, rate, byte_rate, align, bits = struct.unpack("<HHIIHH", h[20:36])
+    assert (fmt, channels, rate, byte_rate, align, bits) == (3, 2, 48000, 384000, 8, 32)
+    assert struct.unpack("<I", h[40:44])[0] == 0xFFFFFFFF  # length unknown: read until EOF
 
 
 def test_publisher_refuses_a_rate_opus_would_resample(raw_config, device, monkeypatch) -> None:
@@ -397,22 +413,34 @@ def test_loop_rejects_an_empty_or_reversed_range(make_client, raw_config, reaper
 
 def test_listen_stats_are_logged_on_one_line(client, caplog) -> None:
     caplog.set_level("INFO", logger="reaper_remote")
-    body = {
+    clean = {
         "mode": "webrtc",
         "seconds": 5.0,
-        "received": 248,
-        "lost": 2,
-        "loss_pct": 0.8,
-        "jitter_ms": 12.5,
-        "concealed_pct": 0.4,
-        "concealment_events": 1,
-        "buffer_ms": 85.0,
+        "received": 250,
+        "lost": 0,
+        "loss_pct": 0.0,
+        "discarded": 0,
+        "jitter_ms": 3.0,
+        "concealed_pct": 0.0,
+        "concealment_events": 0,
+        "buffer_ms": 60.0,
         "rtt_ms": 41.0,
     }
+    assert client.post("/listen-stats", json=clean).status_code == 204
+    rec = next(r for r in caplog.records if r.getMessage().startswith("listen "))
+    assert rec.levelname == "INFO"
+    assert rec.getMessage().startswith("listen mode=webrtc seconds=5.0 received=250 lost=0 ")
+    assert "buffer_ms=60.0 rtt_ms=41.0 from " in rec.getMessage()
+
+
+@pytest.mark.parametrize("field", ["lost", "discarded", "concealment_events"])
+def test_an_interval_with_missing_audio_is_logged_as_a_gap(client, caplog, field) -> None:
+    caplog.set_level("INFO", logger="reaper_remote")
+    body = {"mode": "webrtc", "seconds": 5.0, "received": 250, field: 1}
     assert client.post("/listen-stats", json=body).status_code == 204
-    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("listen "))
-    assert line.startswith("listen mode=webrtc seconds=5.0 received=248 lost=2 loss_pct=0.8 ")
-    assert "buffer_ms=85.0 rtt_ms=41.0 from " in line
+    rec = next(r for r in caplog.records if r.getMessage().startswith("listen "))
+    assert rec.levelname == "WARNING"
+    assert rec.getMessage().startswith("listen GAP mode=webrtc ")
 
 
 def test_listen_stats_log_a_fallback_with_its_reason(client, caplog) -> None:
@@ -420,7 +448,7 @@ def test_listen_stats_log_a_fallback_with_its_reason(client, caplog) -> None:
     body = {"mode": "llhls", "event": "fallback", "reason": "WebRTC dropped"}
     assert client.post("/listen-stats", json=body).status_code == 204
     assert any(
-        "listen mode=llhls event=fallback reason='WebRTC dropped'" in r.getMessage()
+        "listen GAP mode=llhls event=fallback reason='WebRTC dropped'" in r.getMessage()
         for r in caplog.records
     )
 

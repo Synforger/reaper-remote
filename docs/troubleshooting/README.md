@@ -16,22 +16,29 @@ script again (Setup step 5) and update the command ID.
 ## Audio is choppy on the phone
 
 While the phone listens over WebRTC, the page writes what it received to the
-server log every 5 seconds:
+server log every 5 seconds, with the time:
 
 ```
-listen mode=webrtc seconds=5.0 received=248 lost=2 loss_pct=0.8 jitter_ms=12.5 concealed_pct=0.4 concealment_events=1 buffer_ms=85.0 rtt_ms=41.0 from 100.x.y.z
+2026-09-24 19:40:05 INFO:     reaper_remote: listen mode=webrtc seconds=5.0 received=250 lost=0 loss_pct=0.0 discarded=0 jitter_ms=3.0 concealed_pct=0.0 concealment_events=0 buffer_ms=60.0 rtt_ms=41.0 from 100.x.y.z
+2026-09-24 19:40:10 WARNING:     reaper_remote: listen GAP mode=webrtc seconds=5.0 received=248 lost=2 loss_pct=0.8 discarded=0 jitter_ms=12.5 concealed_pct=0.4 concealment_events=1 buffer_ms=85.0 rtt_ms=41.0 from 100.x.y.z
 ```
+
+An interval in which audio went missing is marked `GAP` and logged as a
+warning, so `grep 'listen GAP'` finds every dropout without knowing when it
+was heard.
 
 - `lost` / `loss_pct`: packets that never arrived. Each one is a gap the
   phone has to fill in.
+- `discarded`: packets that arrived too late to be played — late rather than
+  lost.
 - `jitter_ms`: how unevenly packets arrive. `buffer_ms` is how long the phone
   holds audio to smooth that out.
 - `concealed_pct` / `concealment_events`: how much of what was played was
   made up to cover missing audio — what is heard as a crackle or dropout.
 - `rtt_ms`: the round trip to the phone.
 
-A switch to LL-HLS is logged as `listen mode=llhls event=fallback` with its
-reason, and each stall on LL-HLS as `event=waiting`. Compare the lines from
+A switch to LL-HLS is logged as `listen GAP mode=llhls event=fallback` with
+its reason, and each stall on LL-HLS as `event=waiting`. Compare the lines from
 around a dropout with those from clean listening.
 
 ## The dot is green but nothing is heard

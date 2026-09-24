@@ -58,6 +58,7 @@ class ListenStats(BaseModel):
     received: int | None = None
     lost: int | None = None
     loss_pct: float | None = None
+    discarded: int | None = None
     jitter_ms: float | None = None
     concealed_pct: float | None = None
     concealment_events: int | None = None
@@ -310,6 +311,8 @@ def create_app(
     # -- listening stats ----------------------------------------------------------
     @app.post("/listen-stats", status_code=204)
     async def listen_stats(req: ListenStats, request: Request) -> Response:
+        # An interval in which audio went missing is a GAP, logged as a warning,
+        # so dropouts can be found without knowing when they were heard.
         client = request.headers.get("x-forwarded-for") or (
             request.client.host if request.client else "?"
         )
@@ -320,7 +323,14 @@ def create_app(
         parts += [f"{k}={v}" for k, v in fields.items()]
         if req.reason:
             parts.append(f"reason={req.reason!r}")
-        log.info("listen %s from %s", " ".join(parts), client)
+        gap = (
+            any((v or 0) > 0 for v in (req.lost, req.discarded, req.concealment_events))
+            or req.event is not None
+        )
+        if gap:
+            log.warning("listen GAP %s from %s", " ".join(parts), client)
+        else:
+            log.info("listen %s from %s", " ".join(parts), client)
         return Response(status_code=204)
 
     # -- UI (mounted last so the routes above win) ----------------------------

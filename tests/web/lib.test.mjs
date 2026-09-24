@@ -144,7 +144,7 @@ test("measureRange spans whole measures in either direction", () => {
 test("receiveSnapshot picks the audio receive counters and the round trip", () => {
   const report = new Map([
     ["a", { type: "inbound-rtp", kind: "audio", packetsReceived: 500, packetsLost: 4, jitter: 0.012,
-            concealedSamples: 960, totalSamplesReceived: 480000, concealmentEvents: 2,
+            concealedSamples: 960, totalSamplesReceived: 480000, concealmentEvents: 2, packetsDiscarded: 3,
             jitterBufferDelay: 43200, jitterBufferEmittedCount: 480000 }],
     ["b", { type: "candidate-pair", nominated: true, currentRoundTripTime: 0.041 }],
     ["c", { type: "candidate-pair", nominated: false, currentRoundTripTime: 0.9 }],
@@ -153,19 +153,21 @@ test("receiveSnapshot picks the audio receive counters and the round trip", () =
   const s = receiveSnapshot(report, 1000);
   assert.equal(s.received, 500);
   assert.equal(s.lost, 4);
+  assert.equal(s.discarded, 3);
   assert.equal(s.rtt, 0.041);
 });
 
 test("receiveInterval reports loss, concealment and buffer per interval", () => {
   const prev = { at: 0, received: 1000, lost: 10, jitter: 0.01, concealed: 0, samples: 480000,
-                 events: 3, delay: 43200, emitted: 480000, rtt: 0.04 };
+                 events: 3, discarded: 1, delay: 43200, emitted: 480000, rtt: 0.04 };
   const cur = { at: 5000, received: 1245, lost: 15, jitter: 0.0183, concealed: 4800, samples: 720000,
-                events: 5, delay: 64800, emitted: 720000, rtt: 0.052 };
+                events: 5, discarded: 4, delay: 64800, emitted: 720000, rtt: 0.052 };
   assert.deepEqual(receiveInterval(prev, cur), {
     seconds: 5,
     received: 245,
     lost: 5,
     loss_pct: 2,
+    discarded: 3,
     jitter_ms: 18.3,
     concealed_pct: 2,
     concealment_events: 2,
@@ -176,7 +178,7 @@ test("receiveInterval reports loss, concealment and buffer per interval", () => 
 
 test("receiveInterval stays finite with nothing received", () => {
   const snap = { at: 0, received: 0, lost: 0, jitter: 0, concealed: 0, samples: 0, events: 0,
-                 delay: 0, emitted: 0, rtt: null };
+                 discarded: 0, delay: 0, emitted: 0, rtt: null };
   const r = receiveInterval(snap, { ...snap, at: 5000 });
   assert.equal(r.loss_pct, 0);
   assert.equal(r.concealed_pct, 0);
