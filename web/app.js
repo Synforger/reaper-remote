@@ -17,6 +17,7 @@ import {
   parseReply,
   peakToPercent,
   previousMeasureStart,
+  projectLabel,
   receiveInterval,
   receiveSnapshot,
   secondsToMeasure,
@@ -393,8 +394,65 @@ $("btn-next-measure").addEventListener("click", () => {
 new ResizeObserver(() => timeline && renderTimeline()).observe(timelineEl);
 
 setInterval(() => {
-  if (document.visibilityState === "visible") loadTimeline();
+  if (document.visibilityState !== "visible") return;
+  loadTimeline();
+  loadProjects();
 }, TIMELINE_REFRESH_MS);
+
+// -- project tabs ---------------------------------------------------------------
+//
+// The tabs open in REAPER, in a picker above the transport; choosing one
+// switches REAPER to it. Nothing is saved or closed from here. Needs the two
+// project scripts (GET /projects); without them the row stays hidden.
+
+let projectTabs = [];
+
+function renderProjects(tabs) {
+  projectTabs = tabs;
+  const picker = $("project");
+  picker.replaceChildren(
+    ...tabs.map((t) => {
+      const option = document.createElement("option");
+      option.value = String(t.index);
+      option.textContent = projectLabel(t);
+      option.selected = t.active;
+      return option;
+    }),
+  );
+}
+
+async function loadProjects() {
+  let data;
+  try {
+    data = await (await request("projects")).json();
+  } catch (e) {
+    showError(`Projects: ${e.message}`);
+    return;
+  }
+  $("project-row").hidden = !data.enabled;
+  // Leave the list alone while the picker is open.
+  if (data.enabled && document.activeElement !== $("project")) renderProjects(data.tabs);
+}
+
+$("project").addEventListener("change", async (e) => {
+  const tab = projectTabs.find((t) => String(t.index) === e.target.value);
+  if (!tab) return;
+  try {
+    const res = await request("projects/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index: tab.index, name: tab.name }),
+    });
+    renderProjects((await res.json()).tabs);
+    // Everything on the page belongs to the project now shown.
+    timelineKey = "";
+    await Promise.all([loadTimeline(), poll()]);
+  } catch (err) {
+    showError(`Projects: ${err.message}`);
+    loadProjects();
+  }
+  e.target.blur();
+});
 
 // -- tracks -------------------------------------------------------------------
 
@@ -587,6 +645,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     startPolling();
     loadTimeline();
+    loadProjects();
     loadDevices().catch((e) => showError(`Output: ${e.message}`));
   } else stopPolling();
 });
@@ -972,6 +1031,7 @@ async function boot() {
   checkVersion();
   startPolling();
   loadTimeline();
+  loadProjects();
   requestAnimationFrame(drawPlayhead);
   // Setting the loop is optional too: without it a long press stays a seek.
   request("loop")

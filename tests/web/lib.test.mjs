@@ -15,6 +15,7 @@ import {
   parseReply,
   peakToPercent,
   previousMeasureStart,
+  projectLabel,
   receiveInterval,
   receiveSnapshot,
   secondsToMeasure,
@@ -211,4 +212,10 @@ test("withStereoOpus replaces an existing stereo choice and adds a missing fmtp"
   const bare = "a=rtpmap:96 opus/48000/2\na=sendrecv\n";
   assert.equal(withStereoOpus(bare), "a=rtpmap:96 opus/48000/2\na=fmtp:96 stereo=1;sprop-stereo=1\na=sendrecv\n");
   assert.equal(withStereoOpus(withStereoOpus(mono)), withStereoOpus(mono)); // idempotent
+});
+
+test("projectLabel names untitled tabs and marks unsaved ones", () => {
+  assert.equal(projectLabel({ name: "1.RPP", dirty: false }), "1.RPP");
+  assert.equal(projectLabel({ name: "2.RPP", dirty: true }), "2.RPP •");
+  assert.equal(projectLabel({ name: "", dirty: true }), "(untitled) •");
 });

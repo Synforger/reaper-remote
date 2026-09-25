@@ -25,10 +25,13 @@ Unknown keys are rejected at startup, so a typo fails loudly.
 | `render.timeout_s` | `600` | how long to wait for a render to finish |
 | `timeline.action` | (required in `timeline`) | command ID of `reaper/reaper-remote-timeline.lua` (`_RS…`) |
 | `loop.action` | (required in `loop`) | command ID of `reaper/reaper-remote-loop.lua` (`_RS…`) |
+| `projects.list_action` | (required in `projects`) | command ID of `reaper/reaper-remote-projects.lua` (`_RS…`) |
+| `projects.select_action` | (required in `projects`) | command ID of `reaper/reaper-remote-project-select.lua` (`_RS…`) |
 
 A device key that is left out does not get a button. Without a `render` block
 the render button is hidden; without a `timeline` block the seek bar is, and
-without a `loop` block a long press on it seeks instead of setting the loop.
+without a `loop` block a long press on it seeks instead of setting the loop;
+without a `projects` block the project picker is hidden.
 
 ## HTTP API
 
@@ -50,6 +53,8 @@ All paths are relative to where the server is mounted.
 | `GET` | `/loop` | `{"enabled": true \| false}` |
 | `POST` | `/loop` | body `{"start": <s>, "end": <s>}` (seconds, `0 <= start < end`); sets the loop points through the loop script, turns repeat on, and echoes the range |
 | `POST` | `/listen-stats` | body from a listening page: `{"mode": "webrtc", "seconds", "received", "lost", "loss_pct", "jitter_ms", "concealed_pct", "concealment_events", "buffer_ms", "rtt_ms"}` for each 5 s of WebRTC, or `{"mode": "llhls", "event": "fallback" \| "waiting", "reason"?}`. Written to the server log as one `listen …` line; answers `204` |
+| `GET` | `/projects` | `{"enabled": false}`, or `{"enabled": true, "tabs": [{"index", "name", "dirty", "active"}]}` — the open tabs; `name` is the file name, `""` for a project never saved. Runs the list script on every call |
+| `POST` | `/projects/select` | body `{"index": <n>, "name": "<file name>"}`; switches REAPER to that tab when it still has that name, and returns `{"tabs": […]}` as listed afterwards |
 | `GET` | `/timeline` | `{"enabled": false}`, or `{"enabled": true, "end": 163.5, "edges": [0.0, 1.74, …], "loop": {"start", "end"} or null, "regions": [{"id", "name", "start", "end", "color"}], "markers": [{"id", "name", "pos", "color"}]}` (seconds). `edges[i]` and `edges[i + 1]` bound measure `i + 1`; `color` is `0xaarrggbb`, `0` when none is set. Runs the timeline script on every call |
 
 Errors are JSON `{"detail": "..."}`:
@@ -57,10 +62,10 @@ Errors are JSON `{"detail": "..."}`:
 | status | when |
 |---|---|
 | `400` | `POST /device` with an unknown key; `POST /loop` with an empty or reversed range |
-| `404` | device key, `render` or `loop` not configured; unknown rendered file |
-| `409` | `POST /device` to a device that is not connected; `POST /render` while another render is running |
+| `404` | device key, `render`, `loop` or `projects` not configured; unknown rendered file |
+| `409` | `POST /device` to a device that is not connected; `POST /render` while another render is running; `POST /projects/select` when the tab at that index has another name now |
 | `500` | SwitchAudioSource missing or failing |
-| `502` | REAPER's web interface or mediamtx unreachable or erroring; `GET /timeline` when the script left no usable result (wrong `timeline.action`) |
+| `502` | REAPER's web interface or mediamtx unreachable or erroring; `GET /timeline` or the project routes when a script left no usable result (wrong action ID) |
 | `504` | no rendered file appeared within `render.timeout_s` |
 
 There is no authentication in the server itself: it listens on loopback, and

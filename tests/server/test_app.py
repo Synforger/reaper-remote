@@ -464,3 +464,88 @@ def test_listen_stats_log_a_fallback_with_its_reason(client, caplog) -> None:
 )
 def test_listen_stats_reject_what_they_do_not_know(client, body) -> None:
     assert client.post("/listen-stats", json=body).status_code == 422
+
+
+# -- project tabs ---------------------------------------------------------------
+
+TABS_JSON = (
+    '{"tabs":[{"index":0,"name":"1.RPP","dirty":false,"active":true},'
+    '{"index":1,"name":"","dirty":true,"active":false}]}'
+)
+
+
+def test_projects_disabled_without_config(client, reaper) -> None:
+    assert client.get("/projects").json() == {"enabled": False}
+    assert client.post("/projects/select", json={"index": 0, "name": "x"}).status_code == 404
+    assert reaper.requests == []
+
+
+def test_projects_lists_the_tabs_through_the_script(make_client, raw_config, reaper) -> None:
+    raw_config["projects"] = {"list_action": "_RSlist", "select_action": "_RSsel"}
+    with make_client(raw_config) as c:
+        reaper.reply = f"EXTSTATE\treaper_remote\tprojects\t{TABS_JSON}\n"
+        r = c.get("/projects")
+        assert r.status_code == 200, r.text
+        assert r.headers["cache-control"] == "no-store"
+        assert r.json() == {
+            "enabled": True,
+            "tabs": [
+                {"index": 0, "name": "1.RPP", "dirty": False, "active": True},
+                {"index": 1, "name": "", "dirty": True, "active": False},
+            ],
+        }
+        assert reaper.requests == [
+            "/_/SET/EXTSTATE/reaper_remote/projects/;_RSlist;GET/EXTSTATE/reaper_remote/projects"
+        ]
+
+
+@pytest.mark.parametrize("state", ["", "not json", '{"tabs":[{"index":0}]}'])
+def test_projects_without_a_usable_result_is_a_502(make_client, raw_config, reaper, state) -> None:
+    raw_config["projects"] = {"list_action": "_RSlist", "select_action": "_RSsel"}
+    with make_client(raw_config) as c:
+        reaper.reply = f"EXTSTATE\treaper_remote\tprojects\t{state}\n"
+        assert c.get("/projects").status_code == 502
+
+
+def _answer_select(reaper, result: str) -> None:
+    def respond(raw: str) -> None:
+        if "_RSsel" in raw:
+            reaper.reply = f"EXTSTATE\treaper_remote\tproject_select_result\t{result}\n"
+        else:
+            reaper.reply = f"EXTSTATE\treaper_remote\tprojects\t{TABS_JSON}\n"
+
+    reaper.on_request = respond
+
+
+def test_project_select_switches_by_index_and_name_then_lists_again(
+    make_client, raw_config, reaper
+) -> None:
+    raw_config["projects"] = {"list_action": "_RSlist", "select_action": "_RSsel"}
+    with make_client(raw_config) as c:
+        _answer_select(reaper, "ok")
+        r = c.post("/projects/select", json={"index": 3, "name": "ep 2/x.RPP"})
+        assert r.status_code == 200, r.text
+        assert [t["name"] for t in r.json()["tabs"]] == ["1.RPP", ""]
+        assert reaper.requests[0] == (
+            "/_/SET/EXTSTATE/reaper_remote/project_select/3%2Fep%202%2Fx.RPP"
+            ";SET/EXTSTATE/reaper_remote/project_select_result/;_RSsel"
+            ";GET/EXTSTATE/reaper_remote/project_select_result"
+        )
+        assert "_RSlist" in reaper.requests[1]
+
+
+def test_project_select_refused_by_the_script_is_a_409(make_client, raw_config, reaper) -> None:
+    raw_config["projects"] = {"list_action": "_RSlist", "select_action": "_RSsel"}
+    with make_client(raw_config) as c:
+        _answer_select(reaper, "error: tab 3 is no longer 2.RPP")
+        r = c.post("/projects/select", json={"index": 3, "name": "2.RPP"})
+        assert r.status_code == 409
+        assert r.json()["detail"] == "tab 3 is no longer 2.RPP"
+
+
+def test_project_select_without_the_script_is_a_502(make_client, raw_config, reaper) -> None:
+    raw_config["projects"] = {"list_action": "_RSlist", "select_action": "_RSsel"}
+    with make_client(raw_config) as c:
+        _answer_select(reaper, "")
+        assert c.post("/projects/select", json={"index": 0, "name": "1.RPP"}).status_code == 502
+        assert c.post("/projects/select", json={"index": -1, "name": "1.RPP"}).status_code == 422

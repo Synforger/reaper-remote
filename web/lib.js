@@ -86,6 +86,12 @@ export function parseDbInput(text) {
   return dbToVolume(Math.min(DB_MAX, Number(s)));
 }
 
+// The label of a project tab in the picker: its file name, "(untitled)" for a
+// project never saved, and a dot while it has unsaved changes.
+export function projectLabel(tab) {
+  return `${tab.name || "(untitled)"}${tab.dirty ? " •" : ""}`;
+}
+
 // -- timeline -------------------------------------------------------------------
 //
 // `edges` come from GET /timeline: edges[i] and edges[i + 1] (seconds) bound

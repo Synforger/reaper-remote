@@ -23,6 +23,7 @@ phone browser ──https──▶ tailscale serve ──▶ reaper-remote (127.
       │                                        ├─ /render      ─▶ REAPER action (reaper/reaper-remote-render.lua)
       │                                        ├─ /timeline    ─▶ REAPER action (reaper/reaper-remote-timeline.lua)
       │                                        ├─ /loop        ─▶ REAPER action (reaper/reaper-remote-loop.lua)
+      │                                        ├─ /projects    ─▶ REAPER actions (reaper/reaper-remote-project{s,-select}.lua)
       │                                        └─ /whep, /llhls/… ─▶ mediamtx (127.0.0.1:8889 / 8888)
       │                                                                 ▲ RTSP (Opus)
       │                                                    reaper-remote publish ◀─ CoreAudio ◀─ BlackHole 2ch ◀─ Mac output
