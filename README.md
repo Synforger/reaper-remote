@@ -3,7 +3,7 @@
 > Control REAPER and listen to its output from a phone browser, over your own tailnet.
 
 reaper-remote is a small server that runs on the Mac next to REAPER. Open it
-in a phone browser and you get the transport (play / pause / stop / repeat),
+in a phone browser and you get the transport (play / pause / stop / repeat / metronome),
 a seek bar laid out in measures with the project's regions (tap to jump,
 long-press to loop), a fader (drag or
 type a value) with mute and solo for every track, a live stream of what the Mac is

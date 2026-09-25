@@ -16,6 +16,10 @@ export const ICONS = {
     '<path d="M17 4l3 3-3 3V8H7a2 2 0 0 0-2 2v2H3v-2a4 4 0 0 1 4-4h10z"/>' +
       '<path d="M7 20l-3-3 3-3v2h10a2 2 0 0 0 2-2v-2h2v2a4 4 0 0 1-4 4H7z"/>',
   ),
+  metronome: svg(
+    '<path d="M9.2 3h5.6l4.4 17a1 1 0 0 1-1 1.2H5.8a1 1 0 0 1-1-1.2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>' +
+      '<path d="M12 16.5l5.5-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1.6"/>',
+  ),
   render: svg('<path d="M11 3h2v10.2l3.6-3.6 1.4 1.4-6 6-6-6 1.4-1.4 3.6 3.6z"/><rect x="4" y="19" width="16" height="2" rx="1"/>'),
 };
 

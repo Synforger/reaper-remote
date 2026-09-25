@@ -219,3 +219,8 @@ test("projectLabel names untitled tabs and marks unsaved ones", () => {
   assert.equal(projectLabel({ name: "2.RPP", dirty: true }), "2.RPP •");
   assert.equal(projectLabel({ name: "", dirty: true }), "(untitled) •");
 });
+
+test("parseReply reads the on/off state of actions asked for with GET/<id>", () => {
+  const r = parseReply("TRANSPORT\t0\t0.0\t0\t1.1.00\t1.1.00\nCMDSTATE\t40364\t1\nCMDSTATE\t1007\t-1\n");
+  assert.deepEqual(r.actions, { 40364: 1, 1007: -1 });
+});

@@ -4,7 +4,7 @@
 
 ## Works today
 
-- Transport: play / pause / stop / go to start / repeat, with the current position
+- Transport: play / pause / stop / go to start / repeat / metronome, with the current position
 - Seek bar in measures, with regions, markers and the loop points: drag or tap to jump to a measure, tap a region to jump to its start, step one measure back or forward, long-press to loop a region or a span of measures
 - Per-track fader (dB, draggable or typed), mute and solo, with a peak meter
 - Project tabs: see the tabs open in REAPER (unsaved ones marked) and switch between them

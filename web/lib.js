@@ -11,7 +11,8 @@ export const DB_MAX = 12;
 
 // Parse a REAPER reply (lines of tab-separated tokens) into transport + tracks.
 export function parseReply(text) {
-  const out = { transport: null, tracks: [], repeat: null };
+  // `actions` holds the on/off state of each action asked for with GET/<id>.
+  const out = { transport: null, tracks: [], repeat: null, actions: {} };
   for (const line of text.split("\n")) {
     const tok = line.split("\t");
     switch (tok[0]) {
@@ -38,6 +39,10 @@ export function parseReply(text) {
         });
         break;
       }
+      case "CMDSTATE":
+        // state > 0 on, 0 off, -1 for an action without an on/off state.
+        out.actions[tok[1]] = Number(tok[2]);
+        break;
       case "GET/REPEAT":
         out.repeat = Number(tok[1]) !== 0;
         break;

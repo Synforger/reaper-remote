@@ -29,7 +29,7 @@ import { drawIcons, setIcon } from "./icons.js";
 drawIcons();
 
 // REAPER action IDs (main section).
-const ACTION = { PLAY: 1007, PAUSE: 1008, STOP: 1016, GO_TO_START: 40042 };
+const ACTION = { PLAY: 1007, PAUSE: 1008, STOP: 1016, GO_TO_START: 40042, METRONOME: 40364 };
 
 const POLL_MS = 500;
 const FADER_SEND_MS = 60;
@@ -95,6 +95,15 @@ $("btn-play").addEventListener("click", () => {
 $("btn-stop").addEventListener("click", () => send(String(ACTION.STOP)));
 $("btn-start").addEventListener("click", () => send(String(ACTION.GO_TO_START)));
 $("btn-repeat").addEventListener("click", () => send(`SET/REPEAT/${repeat ? 0 : 1}`));
+// The metronome is REAPER's own toggle action; its state comes with every poll.
+$("btn-metronome").addEventListener("click", () => send(String(ACTION.METRONOME)));
+
+function renderMetronome(state) {
+  if (state === undefined) return;
+  const btn = $("btn-metronome");
+  btn.classList.toggle("on", state > 0);
+  btn.setAttribute("aria-pressed", String(state > 0));
+}
 
 async function send(commands) {
   try {
@@ -613,8 +622,9 @@ let polling = null;
 let pollingActive = false;
 
 async function poll() {
-  const reply = parseReply(await reaper("TRANSPORT;TRACK"));
+  const reply = parseReply(await reaper(`TRANSPORT;GET/${ACTION.METRONOME};TRACK`));
   if (reply.transport) renderTransport(reply.transport);
+  renderMetronome(reply.actions[String(ACTION.METRONOME)]);
   renderTracks(reply.tracks);
   showError("");
 }
