@@ -43,6 +43,13 @@ A switch to LL-HLS is logged as `listen GAP mode=llhls event=fallback` with
 its reason, and each stall on LL-HLS as `event=waiting`. Compare the lines from
 around a dropout with those from clean listening.
 
+## The phone plays in mono
+
+Browsers fold received Opus to mono unless the WebRTC description asks for
+stereo. The page adds `stereo=1;sprop-stereo=1` to the Opus line of both the
+offer and mediamtx's answer, so the Mac's left and right arrive as they are.
+LL-HLS always carries both channels.
+
 ## The dot is green but nothing is heard
 
 - The Mac output is `headphones`, so nothing reaches BlackHole. Switch to

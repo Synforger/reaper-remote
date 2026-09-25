@@ -20,6 +20,7 @@ import {
   secondsToMeasure,
   volumeToDb,
   volumeToSlider,
+  withStereoOpus,
 } from "../../web/lib.js";
 
 test("parseReply reads transport and tracks", () => {
@@ -184,4 +185,30 @@ test("receiveInterval stays finite with nothing received", () => {
   assert.equal(r.concealed_pct, 0);
   assert.equal(r.buffer_ms, null);
   assert.equal(r.rtt_ms, null);
+});
+
+test("withStereoOpus asks for stereo on every Opus payload and nothing else", () => {
+  const sdp = [
+    "v=0",
+    "m=audio 9 UDP/TLS/RTP/SAVPF 111 63 9",
+    "a=rtpmap:111 opus/48000/2",
+    "a=rtcp-fb:111 transport-cc",
+    "a=fmtp:111 minptime=10;useinbandfec=1",
+    "a=rtpmap:63 red/48000/2",
+    "a=fmtp:63 111/111",
+    "a=rtpmap:9 G722/8000",
+    "",
+  ].join("\r\n");
+  const out = withStereoOpus(sdp).split("\r\n");
+  assert.ok(out.includes("a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1"));
+  assert.ok(out.includes("a=fmtp:63 111/111")); // not Opus: untouched
+  assert.equal(out.length, sdp.split("\r\n").length);
+});
+
+test("withStereoOpus replaces an existing stereo choice and adds a missing fmtp", () => {
+  const mono = "a=rtpmap:96 opus/48000/2\na=fmtp:96 stereo=0;useinbandfec=1\n";
+  assert.equal(withStereoOpus(mono), "a=rtpmap:96 opus/48000/2\na=fmtp:96 useinbandfec=1;stereo=1;sprop-stereo=1\n");
+  const bare = "a=rtpmap:96 opus/48000/2\na=sendrecv\n";
+  assert.equal(withStereoOpus(bare), "a=rtpmap:96 opus/48000/2\na=fmtp:96 stereo=1;sprop-stereo=1\na=sendrecv\n");
+  assert.equal(withStereoOpus(withStereoOpus(mono)), withStereoOpus(mono)); // idempotent
 });

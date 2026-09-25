@@ -224,3 +224,35 @@ export function receiveInterval(prev, cur) {
     rtt_ms: cur.rtt == null ? null : round(cur.rtt * 1000),
   };
 }
+
+// -- WebRTC -------------------------------------------------------------------
+
+// Mark every Opus payload in an SDP as stereo. Browsers decode Opus to mono
+// unless the description asks for stereo (RFC 7587 `stereo=1`), even when the
+// stream carries two channels; the Mac's output then reaches the phone folded
+// to mono. Applied to both the offer and the answer.
+export function withStereoOpus(sdp) {
+  const eol = sdp.includes("\r\n") ? "\r\n" : "\n";
+  const lines = sdp.split(eol);
+  const opus = new Set(
+    lines.map((l) => l.match(/^a=rtpmap:(\d+) opus\/48000\/2$/i)?.[1]).filter(Boolean),
+  );
+  const out = [];
+  for (const line of lines) {
+    const m = line.match(/^a=fmtp:(\d+) (.*)$/);
+    if (m && opus.has(m[1])) {
+      const params = m[2].split(";").filter((p) => p && !/^(sprop-)?stereo=/.test(p.trim()));
+      out.push(`a=fmtp:${m[1]} ${[...params, "stereo=1", "sprop-stereo=1"].join(";")}`);
+    } else {
+      out.push(line);
+    }
+  }
+  // An Opus payload without an fmtp line gets one.
+  for (const pt of opus) {
+    if (!out.some((l) => l.startsWith(`a=fmtp:${pt} `))) {
+      const at = out.findIndex((l) => l.startsWith(`a=rtpmap:${pt} `));
+      out.splice(at + 1, 0, `a=fmtp:${pt} stereo=1;sprop-stereo=1`);
+    }
+  }
+  return out.join(eol);
+}

@@ -21,6 +21,7 @@ import {
   receiveSnapshot,
   secondsToMeasure,
   volumeToSlider,
+  withStereoOpus,
 } from "./lib.js";
 import { drawIcons, setIcon } from "./icons.js";
 
@@ -662,7 +663,8 @@ async function startWebRtc(stream) {
     audio.srcObject = new MediaStream([e.track]);
     audio.play().catch(() => {});
   });
-  await peer.setLocalDescription(await peer.createOffer());
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription({ type: "offer", sdp: withStereoOpus(offer.sdp) });
   await waitIceGathering(peer);
   const res = await fetch("whep", {
     method: "POST",
@@ -677,7 +679,7 @@ async function startWebRtc(stream) {
     throw new Error("stopped");
   }
   session = res.headers.get("Location");
-  await peer.setRemoteDescription({ type: "answer", sdp: await res.text() });
+  await peer.setRemoteDescription({ type: "answer", sdp: withStereoOpus(await res.text()) });
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("WebRTC did not connect")), WHEP_CONNECT_TIMEOUT_MS);
     peer.addEventListener("connectionstatechange", () => {
