@@ -7,8 +7,8 @@
 -- reaper-remote passes the range through the ExtState `reaper_remote/loop` as
 -- "<start seconds>,<end seconds>" right before it triggers this action. Only
 -- the loop points move: the play position and the time selection stay where
--- they are, so playback does not jump. The empty defer at the end keeps REAPER
--- from adding an undo point for it.
+-- they are, so playback does not jump. Like the timeline script it ends at once
+-- and never defers, so a second call can never find it still running.
 
 local PROJ = 0
 
@@ -21,4 +21,3 @@ if not s or not e or e <= s then
 end
 
 reaper.GetSet_LoopTimeRange2(PROJ, true, true, s, e, false)
-reaper.defer(function() end)

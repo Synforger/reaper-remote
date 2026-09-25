@@ -8,8 +8,10 @@ REAPER is not running, or its web interface is off or on another port.
 `reaper_url`.
 
 If it hangs instead of answering, look at REAPER's screen: while a dialog is
-open (a *ReaScript error* among them) REAPER answers no web request at all.
-Close it. A *ReaScript error* that says a file cannot be read means an action
+open (a *ReaScript error* or *ReaScript task control* among them) REAPER
+answers no web request at all. Close it. *ReaScript task control* ("already
+running in the background") means a script reaper-remote triggers defers; the
+shipped ones never do, and a test keeps it that way. A *ReaScript error* that says a file cannot be read means an action
 in `config.json` points at a script that was moved or deleted; register the
 script again (Setup step 5) and update the command ID.
 

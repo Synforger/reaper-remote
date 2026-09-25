@@ -12,8 +12,11 @@
 -- holds both edges of every measure and at least one measure. REAPER's tempo
 -- map decides every edge, so tempo and time signature changes need nothing here.
 --
--- The script only reads the project. The empty defer at the end tells REAPER
--- not to add an undo point for it, since reaper-remote runs it every few seconds.
+-- The script only reads the project and ends as soon as it has written the
+-- result. It must not defer: a deferred script counts as running until REAPER's
+-- next idle cycle, and a call arriving before that (reaper-remote runs it every
+-- few seconds) opens a modal "already running" dialog that blocks every web
+-- request until someone answers it.
 
 local PROJ = 0
 -- Guards the loop against a runaway tempo map; about 70 minutes at 120 BPM in 4/4.
@@ -43,5 +46,3 @@ local loop_start, loop_end = reaper.GetSet_LoopTimeRange2(PROJ, false, true, 0, 
 reaper.SetExtState("reaper_remote", "timeline",
   string.format("%.6f", length) .. "|" .. table.concat(edges, ",")
     .. string.format("|%.6f,%.6f", loop_start, loop_end), false)
-
-reaper.defer(function() end)
