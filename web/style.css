@@ -61,6 +61,7 @@ button {
 
 button:active { background: var(--line); }
 button.toggle.on { border-color: var(--on); color: var(--on); }
+button.bg { min-width: 40px; padding: 0 6px; font-size: 12px; font-weight: 600; }
 button.wide { font-size: 14px; }
 button:disabled { opacity: 0.5; }
 

@@ -799,11 +799,40 @@ audio.addEventListener("error", () => {
   showError("Audio stream failed. Is mediamtx running, and the Mac output routed to the capture device?");
 });
 
-// Audio plays only while the app is on screen. Going to the background (home
-// screen, another app, the lock screen) stops it and ends the WebRTC session;
-// coming back resumes it if the Mac output still includes the capture device.
-// Folding the host's panel keeps the page visible, so it keeps playing.
+// By default audio plays only while the app is on screen. Going to the
+// background (home screen, another app, the lock screen) stops it and ends the
+// WebRTC session; coming back resumes it if the Mac output still includes the
+// capture device. Folding the host's panel keeps the page visible, so it keeps
+// playing. The BG button turns that off: audio then keeps playing in the
+// background, as far as the phone allows. Each phone remembers its choice.
+
+const BACKGROUND_KEY = "reaper-remote.background";
+let playInBackground = false;
+try {
+  playInBackground = localStorage.getItem(BACKGROUND_KEY) === "1";
+} catch {
+  // Storage blocked (private mode, the host's iframe): the default holds.
+}
+
+function renderBackground() {
+  const btn = $("btn-background");
+  btn.classList.toggle("on", playInBackground);
+  btn.setAttribute("aria-pressed", String(playInBackground));
+}
+
+$("btn-background").addEventListener("click", () => {
+  playInBackground = !playInBackground;
+  try {
+    localStorage.setItem(BACKGROUND_KEY, playInBackground ? "1" : "0");
+  } catch {
+    // Not remembered, but still in effect for this page.
+  }
+  renderBackground();
+});
+renderBackground();
+
 document.addEventListener("visibilitychange", async () => {
+  if (playInBackground) return;
   if (document.visibilityState === "hidden") {
     if (listening) {
       resumeOnVisible = true;

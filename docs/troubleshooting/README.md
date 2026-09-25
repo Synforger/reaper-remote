@@ -76,12 +76,16 @@ mediamtx log shows each session and the candidate pair it used.
 
 ## Audio stops when the phone locks or the app goes to the background
 
-That is by design: the page plays only while it is on screen. Going to the
+That is the default: the page plays only while it is on screen. Going to the
 home screen, another app or the lock screen stops playback and ends the
 stream (the Mac stops capturing shortly after). Coming back resumes it when
 the output is still Multi or BlackHole; if the phone asks for a tap first,
 the dot stays grey until you tap Multi or BlackHole. Folding the host app's
 panel does not count as leaving: the page stays visible and keeps playing.
+
+Turn on **BG** (next to the output buttons) to keep playing in the
+background instead. Each phone remembers the choice. Whether audio really
+continues once the page is out of sight is up to the phone's browser.
 
 ## Audio is choppy, or much shorter than real time
 
