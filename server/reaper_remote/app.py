@@ -1,5 +1,6 @@
-"""HTTP surface: REAPER proxy, output device, render, timeline, loop, the UI, and a thin
-same-origin relay to mediamtx for live audio (WHEP and LL-HLS).
+"""HTTP surface: REAPER proxy, output device, render, timeline, loop, project
+tabs, the UI, and a thin same-origin relay to mediamtx for live audio (WHEP and
+LL-HLS).
 
 Every path is relative to wherever the app is mounted, so the same process
 works at `/` locally and at `/ext/reaper/` behind `tailscale serve --set-path`.
@@ -23,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.types import Scope
 
+from . import projects as projects_reply
 from . import timeline as timeline_reply
 from .config import DEVICE_KEYS, Config
 
@@ -45,6 +47,11 @@ class DeviceRequest(BaseModel):
 class LoopRequest(BaseModel):
     start: float
     end: float
+
+
+class ProjectSelectRequest(BaseModel):
+    index: int = Field(ge=0)
+    name: str = Field(max_length=255)
 
 
 class ListenStats(BaseModel):
@@ -307,6 +314,44 @@ def create_app(
         value = quote(f"{req.start:.6f},{req.end:.6f}", safe="")
         await reaper(f"SET/EXTSTATE/{EXTSTATE_SECTION}/loop/{value};{lc.action};SET/REPEAT/1")
         return {"start": req.start, "end": req.end}
+
+    # -- project tabs -------------------------------------------------------------
+    async def list_projects(pc) -> list[dict]:
+        key = f"{EXTSTATE_SECTION}/{projects_reply.LIST_KEY}"
+        # Cleared first, so a script that did not run reads as empty.
+        reply = await reaper(f"SET/EXTSTATE/{key}/;{pc.list_action};GET/EXTSTATE/{key}")
+        try:
+            return projects_reply.parse_list(reply, EXTSTATE_SECTION)
+        except projects_reply.ProjectsError as e:
+            raise HTTPException(502, str(e)) from e
+
+    @app.get("/projects")
+    async def projects() -> JSONResponse:
+        pc = cfg.projects
+        if pc is None:
+            return JSONResponse({"enabled": False}, headers={"Cache-Control": "no-store"})
+        tabs = await list_projects(pc)
+        return JSONResponse({"enabled": True, "tabs": tabs}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/projects/select")
+    async def select_project(req: ProjectSelectRequest) -> dict:
+        pc = cfg.projects
+        if pc is None:
+            raise HTTPException(404, "projects is not configured")
+        want = quote(f"{req.index}/{req.name}", safe="")
+        result = f"{EXTSTATE_SECTION}/{projects_reply.RESULT_KEY}"
+        reply = await reaper(
+            f"SET/EXTSTATE/{EXTSTATE_SECTION}/{projects_reply.SELECT_KEY}/{want}"
+            f";SET/EXTSTATE/{result}/;{pc.select_action};GET/EXTSTATE/{result}"
+        )
+        try:
+            refused = projects_reply.parse_select(reply, EXTSTATE_SECTION)
+        except projects_reply.ProjectsError as e:
+            raise HTTPException(502, str(e)) from e
+        if refused:
+            # The tabs changed since the page listed them; it lists them again.
+            raise HTTPException(409, refused)
+        return {"tabs": await list_projects(pc)}
 
     # -- listening stats ----------------------------------------------------------
     @app.post("/listen-stats", status_code=204)

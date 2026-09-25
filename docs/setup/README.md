@@ -57,7 +57,7 @@ key). `config.json` is git-ignored; nothing machine-specific is committed.
 
 ## 5. (Optional) Register the REAPER scripts
 
-Three features run a REAPER action that the repository ships as a ReaScript.
+Four features run REAPER actions that the repository ships as ReaScripts.
 Register each one the same way:
 
 1. REAPER → Actions → Show action list → **New action** → *Load ReaScript*,
@@ -69,12 +69,17 @@ Register each one the same way:
 |---|---|---|
 | `reaper/reaper-remote-timeline.lua` | `timeline.action` | the seek bar: measures, regions, markers and the loop points; drag or tap to jump to a measure, tap a region to jump to its start |
 | `reaper/reaper-remote-loop.lua` | `loop.action` | setting the loop from the seek bar: long-press a region to loop it, or long-press and slide to loop measures |
+| `reaper/reaper-remote-projects.lua` and `reaper/reaper-remote-project-select.lua` | `projects.list_action` and `projects.select_action` | the project picker: the open tabs (unsaved ones marked), tap one to switch REAPER to it |
 | `reaper/reaper-remote-render.lua` | `render.action` (and pick a `render.dir`) | the render button |
 
 The timeline script only reads the project: it publishes where every measure
 starts (from REAPER's tempo map, so tempo and time signature changes are
 followed) and where the loop points are, and adds no undo point. The page runs
 it every few seconds, so the seek bar follows edits.
+
+The project scripts list the tabs and switch between them; nothing is saved
+or closed, so no REAPER dialog can come up. A switch goes ahead only when the
+chosen tab still has the name the page showed.
 
 The loop script moves the loop points only (the play position and the time
 selection stay), turns repeat on, and adds no undo point.

@@ -66,6 +66,12 @@ class LoopConfig:
 
 
 @dataclass(frozen=True)
+class ProjectsConfig:
+    list_action: str
+    select_action: str
+
+
+@dataclass(frozen=True)
 class Config:
     reaper_url: str
     stream: StreamConfig
@@ -73,6 +79,7 @@ class Config:
     render: RenderConfig | None
     timeline: TimelineConfig | None = None
     loop: LoopConfig | None = None
+    projects: ProjectsConfig | None = None
     media: MediaConfig = field(default_factory=MediaConfig)
     host: str = "127.0.0.1"
     port: int = 8090
@@ -95,7 +102,18 @@ def parse(raw: dict) -> Config:
     top = _take(
         raw,
         "config",
-        {"host", "port", "reaper_url", "stream", "devices", "render", "timeline", "loop", "media"},
+        {
+            "host",
+            "port",
+            "reaper_url",
+            "stream",
+            "devices",
+            "render",
+            "timeline",
+            "loop",
+            "projects",
+            "media",
+        },
         {"reaper_url", "stream", "devices"},
     )
 
@@ -131,6 +149,14 @@ def parse(raw: dict) -> Config:
         lp = _take(top["loop"], "loop", {"action"}, {"action"})
         loop = LoopConfig(action=str(lp["action"]))
 
+    projects = None
+    if top.get("projects") is not None:
+        keys = {"list_action", "select_action"}
+        pj = _take(top["projects"], "projects", keys, keys)
+        projects = ProjectsConfig(
+            list_action=str(pj["list_action"]), select_action=str(pj["select_action"])
+        )
+
     m = _take(top.get("media", {}), "media", {"webrtc", "hls", "path"}, set())
     media = MediaConfig(
         **{k: str(v).rstrip("/") if k != "path" else str(v).strip("/") for k, v in m.items()}
@@ -149,6 +175,7 @@ def parse(raw: dict) -> Config:
         render=render,
         timeline=timeline,
         loop=loop,
+        projects=projects,
     )
 
 

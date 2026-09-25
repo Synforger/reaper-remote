@@ -104,3 +104,11 @@ def test_loop_is_optional_and_needs_an_action() -> None:
     assert parse(minimal() | {"loop": {"action": "_RSdef"}}).loop.action == "_RSdef"
     with pytest.raises(ConfigError, match="missing key"):
         parse(minimal() | {"loop": {}})
+
+
+def test_projects_is_optional_and_needs_both_actions() -> None:
+    assert parse(minimal()).projects is None
+    pc = parse(minimal() | {"projects": {"list_action": "_RSa", "select_action": "_RSb"}}).projects
+    assert (pc.list_action, pc.select_action) == ("_RSa", "_RSb")
+    with pytest.raises(ConfigError, match="missing key"):
+        parse(minimal() | {"projects": {"list_action": "_RSa"}})

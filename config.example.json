@@ -21,5 +21,9 @@
   },
   "loop": {
     "action": "<command ID of reaper/reaper-remote-loop.lua, starts with _RS>"
+  },
+  "projects": {
+    "list_action": "<command ID of reaper/reaper-remote-projects.lua, starts with _RS>",
+    "select_action": "<command ID of reaper/reaper-remote-project-select.lua, starts with _RS>"
   }
 }
