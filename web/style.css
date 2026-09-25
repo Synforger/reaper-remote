@@ -222,6 +222,7 @@ button.icon { min-width: 40px; padding: 0; font-size: 17px; }
 }
 
 /* Seek bar: regions on top, measure numbers below, the playhead across both. */
+.transport { gap: 6px; }
 .transport button { min-width: 36px; padding: 0 6px; }
 button svg { display: block; margin: auto; }
 
