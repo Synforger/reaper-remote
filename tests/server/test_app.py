@@ -14,18 +14,18 @@ from reaper_remote.publish import default_url, publish, publish_args, wav_header
 
 
 def test_proxy_passes_commands_through_verbatim(client, reaper) -> None:
-    r = client.get("/reaper/_/TRANSPORT;SET/EXTSTATE/a/b/c%2Fd;TRACK/0-3")
+    r = client.get("/reaper/_/TRANSPORT;GET/40364;TRACK")
     assert r.status_code == 200
     assert r.text.startswith("TRANSPORT\t0")
-    assert reaper.requests == ["/_/TRANSPORT;SET/EXTSTATE/a/b/c%2Fd;TRACK/0-3"]
+    assert reaper.requests == ["/_/TRANSPORT;GET/40364;TRACK"]
     assert r.headers["cache-control"] == "no-store"
 
 
 def test_proxy_turns_an_encoded_separator_back_into_a_semicolon(client, reaper) -> None:
     # tailscale serve forwards `;` as `%3B`; REAPER answers nothing to that.
     assert client.get("/reaper/_/TRANSPORT%3BTRACK").status_code == 200
-    assert client.get("/reaper/_/NTRACK%3btrack").status_code == 200
-    assert reaper.requests == ["/_/TRANSPORT;TRACK", "/_/NTRACK;track"]
+    assert client.get("/reaper/_/GET/40364%3bTRACK").status_code == 200
+    assert reaper.requests == ["/_/TRANSPORT;TRACK", "/_/GET/40364;TRACK"]
 
 
 def test_proxy_reports_reaper_errors_as_502(client, reaper) -> None:

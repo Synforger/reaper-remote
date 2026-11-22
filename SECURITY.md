@@ -48,8 +48,9 @@ own devices over their tailnet.
   reaches them through reaper-remote. WebRTC's UDP port (8189) listens on all
   interfaces, since the audio travels there; a session on it exists only
   after a WHEP exchange through reaper-remote.
-- Commands sent to `/reaper/_/` are passed to REAPER unchanged; the server
-  does not filter them. Rendered files are served only from `render.dir`.
+- The server takes requests for its own host names from its own page, and
+  relays to REAPER only the commands that page uses (see the reference). This
+  is not authentication. Rendered files are served only from `render.dir`.
 
 ## In scope
 

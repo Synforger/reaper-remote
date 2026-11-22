@@ -211,7 +211,9 @@ def serve(raw: dict, reaper: FakeReaper, media: FakeMedia) -> Iterator[httpx.Cli
         time.sleep(0.02)
     assert server.started, "uvicorn did not start"
     try:
-        with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=10) as http:
+        # What a browser adds to every request the page itself makes.
+        page = {"Sec-Fetch-Site": "same-origin"}
+        with httpx.Client(base_url=f"http://127.0.0.1:{port}", headers=page, timeout=10) as http:
             yield http
     finally:
         server.should_exit = True

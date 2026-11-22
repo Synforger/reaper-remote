@@ -41,7 +41,7 @@ All paths are relative to where the server is mounted.
 |---|---|---|
 | `GET` | `/` | the UI (served with `Cache-Control: no-cache`) |
 | `GET` | `/version` | `{"ui": "<fingerprint>"}` — a hash of the UI files at start-up; open pages reload themselves when it changes (not while listening) |
-| `GET` | `/reaper/_/<commands>` | REAPER's web interface, passed through unchanged (`text/plain`, tab-separated lines). `<commands>` is `;`-separated, e.g. `TRANSPORT;TRACK` or `SET/TRACK/1/VOL/0.5`; a percent-encoded `%3B` (as some front proxies send it) is treated as `;` too. See [the command list](https://github.com/ReaTeam/Doc/blob/master/web_interface_modding.md) |
+| `GET` | `/reaper/_/<commands>` | REAPER's web interface, for the commands the page uses (`text/plain`, tab-separated lines): `TRANSPORT`, `TRACK`, `GET/<action>` for the metronome (`40364`) only, the actions `1007` `1008` `1016` `40042` `40364`, `SET/REPEAT/<0\|1>`, `SET/POS/<s>`, `SET/TRACK/<n>/MUTE/-1`, `SET/TRACK/<n>/SOLO/-1` and `SET/TRACK/<n>/VOL/<v>`. `<commands>` is `;`-separated, e.g. `TRANSPORT;TRACK`; a percent-encoded `%3B` (as some front proxies send it) is treated as `;` too. See [the command list](https://github.com/ReaTeam/Doc/blob/master/web_interface_modding.md) |
 | `POST` | `/whep` | WHEP offer (`application/sdp`), relayed to mediamtx; answers `201` with the SDP answer and `Location: whep/<session>` |
 | `PATCH`, `DELETE` | `/whep/<session>` | trickle ICE / end of a WHEP session, relayed to mediamtx |
 | `GET` | `/llhls/<file>` | mediamtx's Low-Latency HLS for the path, relayed with its query string (start at `llhls/index.m3u8`) |
@@ -62,11 +62,18 @@ Errors are JSON `{"detail": "..."}`:
 | status | when |
 |---|---|
 | `400` | `POST /device` with an unknown key; `POST /loop` with an empty or reversed range |
+| `403` | a command outside the list above; a request for another host name or from another page (see below) |
 | `404` | device key, `render`, `loop` or `projects` not configured; unknown rendered file |
 | `409` | `POST /device` to a device that is not connected; `POST /render` while another render is running; `POST /projects/select` when the tab at that index has another name now |
 | `500` | SwitchAudioSource missing or failing |
 | `502` | REAPER's web interface or mediamtx unreachable or erroring; `GET /timeline` or the project routes when a script left no usable result (wrong action ID) |
 | `504` | no rendered file appeared within `render.timeout_s` |
+
+The server answers to `localhost`, `127.0.0.1`, `[::1]`, names ending in
+`.ts.net`, and `host` when that is set to a name or address. Requests must come
+from the server's own page. A read without browser headers (a media player,
+`curl`) is answered; a change without them is not, so a script that drives
+REAPER should talk to REAPER's web interface directly.
 
 There is no authentication in the server itself: it listens on loopback, and
 Tailscale decides who reaches it. See [SECURITY.md](../../SECURITY.md).

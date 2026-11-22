@@ -28,6 +28,8 @@ rtspAddress: 127.0.0.1:8554
 hls: true
 hlsAddress: 127.0.0.1:8888
 hlsVariant: lowLatency
+# The page uses reaper-remote's relay, so no other origin is needed.
+hlsAllowOrigins: []
 # Close an idle HLS muxer (and with it the publisher) soon after the last
 # listener, instead of the default 60 s.
 hlsMuxerCloseAfter: 10s
@@ -36,6 +38,7 @@ hlsMuxerCloseAfter: 10s
 webrtc: true
 webrtcAddress: 127.0.0.1:8889
 webrtcLocalUDPAddress: :8189
+webrtcAllowOrigins: []
 
 # Only local clients (the publisher and reaper-remote's relay) may use the paths.
 authInternalUsers:
