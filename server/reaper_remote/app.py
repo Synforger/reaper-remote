@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -24,7 +25,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.types import Scope
 
+from . import commands as ui_commands
 from . import projects as projects_reply
+from . import request_source
 from . import timeline as timeline_reply
 from .config import DEVICE_KEYS, Config
 
@@ -102,6 +105,12 @@ async def _run(*args: str) -> tuple[int, str, str]:
     return proc.returncode or 0, out.decode().strip(), err.decode().strip()
 
 
+def ui_paths(web_dir: Path) -> frozenset[str]:
+    """The URL paths of the page's own files, which any link or frame may open."""
+    files = (p.relative_to(web_dir).as_posix() for p in web_dir.rglob("*") if p.is_file())
+    return frozenset({"/", *(f"/{name}" for name in files)})
+
+
 def create_app(
     cfg: Config,
     reaper_transport: httpx.AsyncBaseTransport | None = None,
@@ -131,6 +140,30 @@ def create_app(
         )
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
+    page_paths = ui_paths(cfg.web_dir)
+
+    @app.middleware("http")
+    async def check_source(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        headers = request.headers
+        reading = request.method in ("GET", "HEAD")
+        if not request_source.is_own_host(headers.get("host", ""), cfg.host):
+            refused = "unknown host name"
+        elif reading and request.scope["path"] in page_paths:
+            refused = None
+        elif not (
+            request_source.may_read(headers) if reading else request_source.may_change(headers)
+        ):
+            refused = "request did not come from this page"
+        else:
+            refused = None
+        if refused is None:
+            return await call_next(request)
+        # Outside the exception handler, and the path is the caller's text.
+        log.warning("%s %r -> 403: %s", request.method, request.scope["path"], refused)
+        return JSONResponse({"detail": refused}, status_code=403)
+
     render_lock = asyncio.Lock()
 
     async def reaper(commands: str, timeout: float = PROXY_TIMEOUT_S) -> str:
@@ -142,15 +175,20 @@ def create_app(
             raise HTTPException(502, f"REAPER web interface answered {r.status_code}")
         return r.text
 
-    # -- REAPER web API, passed through byte-for-byte ------------------------
+    # -- REAPER web API: the page's commands, relayed as sent -----------------
     @app.get(PROXY_PREFIX + "{commands:path}")
     async def proxy(request: Request) -> Response:
         # Use the raw path so `;`, `%2F` and friends reach REAPER exactly as sent.
         raw = request.scope["raw_path"].decode("latin-1")
-        commands = raw[raw.index(PROXY_PREFIX) + len(PROXY_PREFIX) :]
+        _, _, commands = raw.partition(PROXY_PREFIX)
         # Front proxies (tailscale serve among them) may percent-encode the
         # `;` separator, and REAPER only splits on a literal `;`.
         commands = commands.replace("%3B", ";").replace("%3b", ";")
+        if not ui_commands.is_relayed(commands):
+            raise HTTPException(403, "not a command this page uses")
+        # These travel as GET, so the method alone does not mark them as changes.
+        if ui_commands.is_change(commands) and not request_source.may_change(request.headers):
+            raise HTTPException(403, "request did not come from this page")
         body = await reaper(commands)
         return Response(body, media_type="text/plain", headers={"Cache-Control": "no-store"})
 

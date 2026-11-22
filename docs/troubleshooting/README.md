@@ -15,6 +15,12 @@ shipped ones never do, and a test keeps it that way. A *ReaScript error* that sa
 in `config.json` points at a script that was moved or deleted; register the
 script again (Setup step 5) and update the command ID.
 
+## The page shows `unknown host name` or `request did not come from this page`
+
+Open the page at `http://127.0.0.1:8090/` on the Mac or at its
+`https://<your-mac>.<your-tailnet>.ts.net/…` address. A proxy in front of the
+server must forward the browser's `Host` header unchanged.
+
 ## Audio is choppy on the phone
 
 While the phone listens over WebRTC, the page writes what it received to the
