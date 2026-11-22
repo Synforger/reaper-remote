@@ -22,8 +22,8 @@ Two-tier policy, one implementation:
 
 - `ci.yml` — `task ci` (lint + unit tests + docs:check + lint:versions)
   on pull requests, public repos only.
-- `version-bump.yml` — shipped disabled (`if: false`); version bumps
-  happen locally via `task version:bump`.
+
+Version bumps happen locally via `task version:bump`.
 
 ## Local-only by design
 
